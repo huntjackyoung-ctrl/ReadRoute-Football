@@ -153,6 +153,7 @@ const els = {
   scenarioStatus: document.querySelector("#scenarioStatus"),
   defensePathHelp: document.querySelector("#defensePathHelp"),
   zoneSizeControl: document.querySelector("#zoneSizeControl"),
+  zoneSizeRange: document.querySelector("#zoneSizeRange"),
   zoneSizeInput: document.querySelector("#zoneSizeInput"),
   routeOptionsEditor: document.querySelector("#routeOptionsEditor"),
   routeOptionPlayer: document.querySelector("#routeOptionPlayer"),
@@ -1160,7 +1161,9 @@ function renderDefenseControls() {
     createScreen !== "defense" || defenseAssignmentMode !== "zone" || !selectedZone
   );
   if (selectedZone) {
-    els.zoneSizeInput.value = String(selectedZone.radius || 130);
+    const radius = String(selectedZone.radius || 130);
+    els.zoneSizeRange.value = radius;
+    els.zoneSizeInput.value = radius;
   }
 }
 
@@ -3255,13 +3258,28 @@ document.querySelector("#defenseZoneModeButton").addEventListener("click", () =>
   render();
 });
 
-els.zoneSizeInput.addEventListener("input", event => {
+function updateSelectedZoneSize(value) {
   const zone = currentDefense().zoneAssignments?.[activeRouteId];
   if (!zone) return;
-  const radius = Math.max(40, Math.min(300, Number(event.target.value) || 130));
+  const radius = Math.max(40, Math.min(300, Number(value) || 130));
   zone.radius = radius;
+  els.zoneSizeRange.value = String(radius);
+  els.zoneSizeInput.value = String(radius);
   saveDefenses();
   renderDefense();
+}
+
+els.zoneSizeRange.addEventListener("input", event => {
+  updateSelectedZoneSize(event.target.value);
+});
+
+els.zoneSizeInput.addEventListener("input", event => {
+  if (event.target.value === "") return;
+  updateSelectedZoneSize(event.target.value);
+});
+
+els.zoneSizeInput.addEventListener("change", event => {
+  updateSelectedZoneSize(event.target.value);
 });
 
 document.querySelector("#defenseManModeButton").addEventListener("click", () => {

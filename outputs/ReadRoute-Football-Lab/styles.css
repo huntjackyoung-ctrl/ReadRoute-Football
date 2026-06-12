@@ -825,16 +825,28 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   background: #fff;
 }
 .zone-size-control.hidden { display: none; }
-.zone-size-control span {
+.zone-size-control label {
   display: block;
   color: var(--muted);
   font-size: 10px;
   font-weight: 850;
 }
-.zone-size-control input {
-  width: 100%;
+.zone-size-inputs {
   margin-top: 7px;
+  display: grid;
+  grid-template-columns: 1fr 68px;
+  gap: 8px;
+  align-items: center;
+}
+.zone-size-inputs input[type="range"] {
+  width: 100%;
+  padding: 0;
+  accent-color: var(--green);
+}
+.zone-size-inputs input[type="number"] {
+  width: 68px;
   padding: 8px 9px;
+  text-align: center;
 }
 .defense-label-editor {
   margin: 17px 0;

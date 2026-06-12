@@ -269,10 +269,13 @@
             <button id="defenseManModeButton" class="route-tool-button">Man Assignment</button>
             <button id="defenseNoMovementButton" class="route-tool-button">No Movement</button>
           </div>
-          <label id="zoneSizeControl" class="zone-size-control hidden" for="zoneSizeInput">
-            <span>Zone size</span>
-            <input id="zoneSizeInput" type="number" min="40" max="300" step="5" value="130">
-          </label>
+          <div id="zoneSizeControl" class="zone-size-control hidden">
+            <label for="zoneSizeRange">Zone size</label>
+            <div class="zone-size-inputs">
+              <input id="zoneSizeRange" type="range" min="40" max="300" step="5" value="130">
+              <input id="zoneSizeInput" type="number" min="40" max="300" step="5" value="130" aria-label="Zone size number">
+            </div>
+          </div>
           <p id="defensePathHelp">Select a defender, then draw movement or assign the offensive player they guard.</p>
         </div>
 
