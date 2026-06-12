@@ -2292,6 +2292,11 @@ function renderNotes() {
 
     if (appTab === "create") {
       group.addEventListener("click", event => event.stopPropagation());
+      group.addEventListener("pointermove", event => {
+        if (dragState?.side === "note") return;
+        event.stopPropagation();
+        els.routes.querySelector(".drawing-guide")?.remove();
+      });
       const dragHandle = svgEl("rect", {
         x: 0,
         y: 0,
@@ -2326,8 +2331,12 @@ function renderNotes() {
       textarea.value = note.text;
       textarea.placeholder = "Type a note";
       textarea.setAttribute("aria-label", "Field note");
-      textarea.addEventListener("pointerdown", event => event.stopPropagation());
-      textarea.addEventListener("click", event => event.stopPropagation());
+      ["pointerdown", "pointermove", "pointerup", "click", "dblclick"].forEach(eventName => {
+        textarea.addEventListener(eventName, event => event.stopPropagation());
+      });
+      textarea.addEventListener("focus", () => {
+        els.routes.querySelector(".drawing-guide")?.remove();
+      });
       textarea.addEventListener("input", event => {
         note.text = event.target.value;
         const next = noteDimensions(note.text);

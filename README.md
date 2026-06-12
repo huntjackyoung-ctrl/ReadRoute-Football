@@ -50,7 +50,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Reusable named defenses with saved alignments and movement
 - Editable labels for all 11 defensive players
 - Blank 11-player defensive canvas with no coverage templates
-- Draggable field notes with direct text editing and delete controls
+- Draggable field notes with isolated text editing, selection, and delete controls
 - Auto-growing note boxes with compact top-right delete controls
 - New formations and defenses inherit player labels from the first saved setup
 - Smaller route and defensive movement arrowheads
