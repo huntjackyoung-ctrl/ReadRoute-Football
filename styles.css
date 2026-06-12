@@ -826,8 +826,7 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
 }
 .zone-size-control.hidden { display: none; }
 .zone-size-control span {
-  display: flex;
-  justify-content: space-between;
+  display: block;
   color: var(--muted);
   font-size: 10px;
   font-weight: 850;
@@ -835,8 +834,7 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
 .zone-size-control input {
   width: 100%;
   margin-top: 7px;
-  padding: 0;
-  accent-color: var(--green);
+  padding: 8px 9px;
 }
 .defense-label-editor {
   margin: 17px 0;

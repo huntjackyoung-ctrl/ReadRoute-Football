@@ -153,8 +153,7 @@ const els = {
   scenarioStatus: document.querySelector("#scenarioStatus"),
   defensePathHelp: document.querySelector("#defensePathHelp"),
   zoneSizeControl: document.querySelector("#zoneSizeControl"),
-  zoneSizeRange: document.querySelector("#zoneSizeRange"),
-  zoneSizeValue: document.querySelector("#zoneSizeValue"),
+  zoneSizeInput: document.querySelector("#zoneSizeInput"),
   routeOptionsEditor: document.querySelector("#routeOptionsEditor"),
   routeOptionPlayer: document.querySelector("#routeOptionPlayer"),
   routeOptionSelect: document.querySelector("#routeOptionSelect"),
@@ -1084,7 +1083,7 @@ function libraryPreviewMarkup() {
       ? `<line x1="${start.x}" y1="${start.y}" x2="${offensePositions[manTarget].x}" y2="${offensePositions[manTarget].y}" stroke="#c9f45c" stroke-width="2" stroke-dasharray="5 5" opacity=".7"></line>`
       : "";
     const zoneMarkup = zoneAssignment
-      ? `<circle cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" r="${zoneAssignment.radius || 125}" fill="rgba(118,215,255,.08)" stroke="#76d7ff" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></circle>`
+      ? `<circle cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" r="${zoneAssignment.radius || 130}" fill="rgba(118,215,255,.08)" stroke="#76d7ff" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></circle>`
       : "";
     const path = route.length
       ? `<path d="${route.length === 1 ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}` : routePathData(start, route)}" fill="none" stroke="#ed7048" stroke-width="4" stroke-dasharray="10 6" marker-end="url(#libraryDefenseArrow)"></path>`
@@ -1161,8 +1160,7 @@ function renderDefenseControls() {
     createScreen !== "defense" || defenseAssignmentMode !== "zone" || !selectedZone
   );
   if (selectedZone) {
-    els.zoneSizeRange.value = String(selectedZone.radius || 125);
-    els.zoneSizeValue.textContent = String(selectedZone.radius || 125);
+    els.zoneSizeInput.value = String(selectedZone.radius || 130);
   }
 }
 
@@ -1774,7 +1772,7 @@ function defender(x, y, label = "") {
     els.zones.append(svgEl("circle", {
       cx: zoneAssignment.x,
       cy: zoneAssignment.y,
-      r: zoneAssignment.radius || 125,
+      r: zoneAssignment.radius || 130,
       fill: "rgba(118,215,255,.08)",
       stroke: "#76d7ff",
       "stroke-width": selectedZone ? 3 : 2,
@@ -2501,12 +2499,10 @@ els.field.addEventListener("click", event => {
     delete currentDefense().manAssignments[activeRouteId];
     currentDefense().routes[activeRouteId] = [];
     const point = eventToFieldPoint(event);
-    const start = currentDefense().positions[activeRouteId];
-    const depth = Math.max(0, lineOfScrimmage - start.y);
     currentDefense().zoneAssignments[activeRouteId] = {
       x: point.x,
       y: point.y,
-      radius: depth > 220 ? 180 : depth > 120 ? 145 : 115
+      radius: 130
     };
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "path") {
@@ -2822,7 +2818,7 @@ function clampToZone(point, zone) {
   const dx = point.x - zone.x;
   const dy = point.y - zone.y;
   const distance = Math.hypot(dx, dy);
-  const radius = zone.radius || 125;
+  const radius = zone.radius || 130;
   if (!distance || distance <= radius) return point;
   return {
     x: zone.x + ((dx / distance) * radius),
@@ -2833,7 +2829,7 @@ function clampToZone(point, zone) {
 function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds) {
   const isDeepSafety = state.start.y < lineOfScrimmage - 190;
   const reactionTime = isDeepSafety ? .42 : .24;
-  const radius = zone.radius || 125;
+  const radius = zone.radius || 130;
   const threats = receivers
     .map(receiver => ({
       ...receiver,
@@ -3259,11 +3255,11 @@ document.querySelector("#defenseZoneModeButton").addEventListener("click", () =>
   render();
 });
 
-els.zoneSizeRange.addEventListener("input", event => {
+els.zoneSizeInput.addEventListener("input", event => {
   const zone = currentDefense().zoneAssignments?.[activeRouteId];
   if (!zone) return;
-  zone.radius = Number(event.target.value);
-  els.zoneSizeValue.textContent = event.target.value;
+  const radius = Math.max(40, Math.min(300, Number(event.target.value) || 130));
+  zone.radius = radius;
   saveDefenses();
   renderDefense();
 });
