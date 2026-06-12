@@ -110,6 +110,7 @@
             <button id="deleteRouteOptionButton" class="route-tool-button danger">Delete Option</button>
           </div>
           <p class="route-option-help">Select an option, click its branch point anywhere on the solid base route, then draw the dotted branch. Matching defenses take that branch automatically.</p>
+          <div id="allRouteOptions" class="all-route-options"></div>
         </div>
       </aside>
 
@@ -270,11 +271,12 @@
             <button id="defenseNoMovementButton" class="route-tool-button">No Movement</button>
           </div>
           <div id="zoneSizeControl" class="zone-size-control hidden">
-            <label for="zoneSizeRange">Zone size</label>
+            <label for="zoneSizeRange">Zone size (overall)</label>
             <div class="zone-size-inputs">
               <input id="zoneSizeRange" type="range" min="40" max="300" step="5" value="130">
               <input id="zoneSizeInput" type="number" min="40" max="300" step="5" value="130" aria-label="Zone size number">
             </div>
+            <p class="zone-resize-help">Drag the selected zone's side handles to make an oval, or its corner handle to scale it.</p>
           </div>
           <p id="defensePathHelp">Select a defender, then draw movement or assign the offensive player they guard.</p>
         </div>

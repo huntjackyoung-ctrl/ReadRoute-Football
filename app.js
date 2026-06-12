@@ -17,6 +17,15 @@ const offensiveLine = [
 const quarterback = { id: "QB", label: "QB", x: 450, y: 540 };
 const lineOfScrimmage = 476;
 const scrimmageSnapDistance = 16;
+const storageKeys = {
+  plays: "readroute-drawn-plays",
+  formations: "readroute-formations",
+  defenses: "readroute-defenses",
+  snapshot: "readroute-playbook-snapshot",
+  previousSnapshot: "readroute-playbook-snapshot-previous",
+  draft: "readroute-play-draft",
+  savedAt: "readroute-last-saved-at"
+};
 
 const fieldStandards = {
   highSchool: {
@@ -88,12 +97,13 @@ function createBlankDefense(name = "Untitled Defense", labels = {}) {
 let plays = loadPlays();
 let formations = loadFormations();
 let defenses = loadDefenses();
+let recoveredDraft = loadDraftPlay();
 let selectedPlayId = plays[0].id;
-let draftPlay = null;
-let selectedFormationId = plays[0].formationId || formations[0].id;
+let draftPlay = recoveredDraft;
+let selectedFormationId = recoveredDraft?.formationId || plays[0].formationId || formations[0].id;
 let selectedDefenseId = defenses[0].id;
 let appTab = "create";
-let createScreen = "formation";
+let createScreen = recoveredDraft ? "play" : "formation";
 let activeRouteId = "X";
 let activeRouteSide = "offense";
 let boardMode = "move";
@@ -111,6 +121,8 @@ let scenarioTool = "move";
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let saveToastTimer = null;
+let autosaveTimer = null;
+let lastSavedSignature = "";
 let fieldStandard = localStorage.getItem("readroute-field-standard") || "highSchool";
 if (!fieldStandards[fieldStandard]) fieldStandard = "highSchool";
 
@@ -161,15 +173,37 @@ const els = {
   routeOptionDetails: document.querySelector("#routeOptionDetails"),
   routeOptionName: document.querySelector("#routeOptionName"),
   routeOptionDefense: document.querySelector("#routeOptionDefense"),
+  allRouteOptions: document.querySelector("#allRouteOptions"),
 };
 
-function loadPlays() {
+function readJsonStorage(key) {
   try {
-    const saved = JSON.parse(localStorage.getItem("readroute-drawn-plays"));
-    return Array.isArray(saved) && saved.length ? saved.map(normalizePlay) : [createBlankPlay()];
+    const value = localStorage.getItem(key);
+    return value ? JSON.parse(value) : null;
   } catch {
-    return [createBlankPlay()];
+    return null;
   }
+}
+
+function recoverySnapshot() {
+  const current = readJsonStorage(storageKeys.snapshot);
+  if (current?.plays?.length && current?.formations?.length && current?.defenses?.length) {
+    return current;
+  }
+  const previous = readJsonStorage(storageKeys.previousSnapshot);
+  return previous?.plays?.length && previous?.formations?.length && previous?.defenses?.length
+    ? previous
+    : null;
+}
+
+function loadPlays() {
+  const saved = readJsonStorage(storageKeys.plays);
+  const recovered = Array.isArray(saved) && saved.length
+    ? saved
+    : recoverySnapshot()?.plays;
+  return Array.isArray(recovered) && recovered.length
+    ? recovered.map(normalizePlay)
+    : [createBlankPlay()];
 }
 
 function normalizePlay(play) {
@@ -234,18 +268,17 @@ function normalizePlay(play) {
 }
 
 function loadFormations() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("readroute-formations"));
-    if (Array.isArray(saved) && saved.length) {
-      return saved.map(formation => ({
-        ...formation,
-        labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
-        offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
-        notes: Array.isArray(formation.notes) ? formation.notes : []
-      }));
-    }
-  } catch {
-    // Fall through to a formation based on the current play.
+  const saved = readJsonStorage(storageKeys.formations);
+  const recovered = Array.isArray(saved) && saved.length
+    ? saved
+    : recoverySnapshot()?.formations;
+  if (Array.isArray(recovered) && recovered.length) {
+    return recovered.map(formation => ({
+      ...formation,
+      labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
+      offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
+      notes: Array.isArray(formation.notes) ? formation.notes : []
+    }));
   }
   const source = plays[0];
   const formation = {
@@ -260,19 +293,29 @@ function loadFormations() {
 }
 
 function loadDefenses() {
-  try {
-    const saved = JSON.parse(localStorage.getItem("readroute-defenses"));
-    if (Array.isArray(saved) && saved.length) return saved.map(defense => ({
+  const saved = readJsonStorage(storageKeys.defenses);
+  const recovered = Array.isArray(saved) && saved.length
+    ? saved
+    : recoverySnapshot()?.defenses;
+  if (Array.isArray(recovered) && recovered.length) {
+    return recovered.map(defense => ({
       ...defense,
       positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
       routes: defense.routes || {},
       manAssignments: defense.manAssignments || {},
-      zoneAssignments: defense.zoneAssignments || {},
+      zoneAssignments: Object.fromEntries(
+        Object.entries(defense.zoneAssignments || {}).map(([id, assignment]) => {
+          const legacyRadius = Number(assignment?.radius) || 130;
+          return [id, {
+            ...assignment,
+            radiusX: Math.max(40, Math.min(300, Number(assignment?.radiusX) || legacyRadius)),
+            radiusY: Math.max(40, Math.min(300, Number(assignment?.radiusY) || legacyRadius))
+          }];
+        })
+      ),
       labels: defense.labels || {},
       notes: Array.isArray(defense.notes) ? defense.notes : []
     }));
-  } catch {
-    // Fall through to migrate the current play's defense.
   }
   const source = plays[0];
   return [{
@@ -290,21 +333,134 @@ function loadDefenses() {
   }];
 }
 
+function loadDraftPlay() {
+  const saved = readJsonStorage(storageKeys.draft);
+  const recovered = saved?.play || recoverySnapshot()?.draftPlay;
+  return recovered ? normalizePlay(recovered) : null;
+}
+
+function playbookSnapshot() {
+  return {
+    version: 2,
+    savedAt: new Date().toISOString(),
+    fieldStandard,
+    formations,
+    plays,
+    defenses,
+    draftPlay: draftPlay ? structuredClone(draftPlay) : null
+  };
+}
+
+function openRecoveryDatabase() {
+  return new Promise((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error("IndexedDB is unavailable"));
+      return;
+    }
+    const request = indexedDB.open("ReadRouteRecovery", 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains("snapshots")) {
+        database.createObjectStore("snapshots");
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function persistIndexedDbSnapshot(snapshot) {
+  try {
+    const database = await openRecoveryDatabase();
+    await new Promise((resolve, reject) => {
+      const transaction = database.transaction("snapshots", "readwrite");
+      transaction.objectStore("snapshots").put(snapshot, "latest");
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+    });
+    database.close();
+  } catch (error) {
+    console.warn("ReadRoute secondary backup unavailable", error);
+  }
+}
+
+async function readIndexedDbSnapshot() {
+  try {
+    const database = await openRecoveryDatabase();
+    const snapshot = await new Promise((resolve, reject) => {
+      const transaction = database.transaction("snapshots", "readonly");
+      const request = transaction.objectStore("snapshots").get("latest");
+      request.onsuccess = () => resolve(request.result || null);
+      request.onerror = () => reject(request.error);
+    });
+    database.close();
+    return snapshot;
+  } catch {
+    return null;
+  }
+}
+
+function persistPlaybook({ rotateBackup = true } = {}) {
+  const snapshot = playbookSnapshot();
+  try {
+    const signature = JSON.stringify({
+      formations,
+      plays,
+      defenses,
+      draftPlay,
+      fieldStandard
+    });
+    if (signature === lastSavedSignature) return true;
+
+    const currentSnapshot = localStorage.getItem(storageKeys.snapshot);
+    if (rotateBackup && currentSnapshot) {
+      localStorage.setItem(storageKeys.previousSnapshot, currentSnapshot);
+    }
+    localStorage.setItem(storageKeys.plays, JSON.stringify(plays));
+    localStorage.setItem(storageKeys.formations, JSON.stringify(formations));
+    localStorage.setItem(storageKeys.defenses, JSON.stringify(defenses));
+    localStorage.setItem(storageKeys.snapshot, JSON.stringify(snapshot));
+    localStorage.setItem(storageKeys.savedAt, snapshot.savedAt);
+    if (draftPlay) {
+      localStorage.setItem(storageKeys.draft, JSON.stringify({
+        savedAt: snapshot.savedAt,
+        play: draftPlay
+      }));
+    } else {
+      localStorage.removeItem(storageKeys.draft);
+    }
+    lastSavedSignature = signature;
+    if (els.playCount) els.playCount.textContent = plays.length;
+    persistIndexedDbSnapshot(snapshot);
+    return true;
+  } catch (error) {
+    console.error("ReadRoute autosave failed", error);
+    persistIndexedDbSnapshot(snapshot);
+    if (els.saveToast) showSaveSuccess("Autosave failed - export your playbook");
+    return false;
+  }
+}
+
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => persistPlaybook(), 120);
+}
+
 function savePlays() {
-  localStorage.setItem("readroute-drawn-plays", JSON.stringify(plays));
-  els.playCount.textContent = plays.length;
+  scheduleAutosave();
+  if (els.playCount) els.playCount.textContent = plays.length;
 }
 
 function saveFormations() {
-  localStorage.setItem("readroute-formations", JSON.stringify(formations));
+  scheduleAutosave();
 }
 
 function saveDefenses() {
-  localStorage.setItem("readroute-defenses", JSON.stringify(defenses));
+  scheduleAutosave();
 }
 
 function currentPlay() {
-  if (draftPlay) return draftPlay;
+  if (draftPlay && appTab === "create" && createScreen === "play") return draftPlay;
   return plays.find(play => play.id === selectedPlayId) || plays[0];
 }
 
@@ -490,6 +646,32 @@ function emptyPlayPaths(play) {
   });
 }
 
+function draftHasWork(play) {
+  if (!play) return false;
+  return Boolean(
+    play.name?.trim()
+    || play.notes?.length
+    || skillPositions.some(position =>
+      play.routes[position.id]?.length
+      || play.motions[position.id]?.length
+      || play.routeOptions[position.id]?.length
+    )
+  );
+}
+
+function preserveDraftBeforeReplacement() {
+  if (!draftPlay) return;
+  if (draftHasWork(draftPlay)) {
+    draftPlay.name = draftPlay.name?.trim()
+      || `Recovered Draft ${new Date().toLocaleString()}`;
+    plays.push(draftPlay);
+    selectedPlayId = draftPlay.id;
+  }
+  draftPlay = null;
+  lastSavedSignature = "";
+  persistPlaybook();
+}
+
 function currentNoteOwner() {
   if (createScreen === "formation") return currentFormation();
   if (createScreen === "defense") return currentDefense();
@@ -551,6 +733,22 @@ function svgEl(name, attrs = {}) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);
   Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
   return element;
+}
+
+function zoneRadii(zone) {
+  const legacyRadius = Number(zone?.radius) || 130;
+  return {
+    x: Math.max(40, Math.min(300, Number(zone?.radiusX) || legacyRadius)),
+    y: Math.max(40, Math.min(300, Number(zone?.radiusY) || legacyRadius))
+  };
+}
+
+function zoneDistance(point, zone) {
+  const radii = zoneRadii(zone);
+  return Math.hypot(
+    (point.x - zone.x) / radii.x,
+    (point.y - zone.y) / radii.y
+  );
 }
 
 function renderMarkings() {
@@ -712,6 +910,55 @@ function renderRouteOptionControls() {
       </label>`
     ).join("");
   }
+
+  const allOptions = skillPositions.flatMap(position =>
+    routeOptionsFor(currentPlay(), position.id).map(option => ({
+      positionId: position.id,
+      player: currentPlay().labels[position.id] || position.id,
+      option
+    }))
+  );
+  els.allRouteOptions.innerHTML = `
+    <p class="all-route-options-title">All options in this play</p>
+    ${allOptions.length
+      ? allOptions.map(item => `
+          <div class="route-option-file ${
+            activeRouteId === item.positionId && selectedRouteOptionId === item.option.id
+              ? "active"
+              : ""
+          }">
+            <span>${escapeHtml(item.player)}: ${escapeHtml(item.option.name)}</span>
+            <button class="route-tool-button" data-edit-route-option="${item.option.id}" data-option-player="${item.positionId}">Edit</button>
+            <button class="route-tool-button danger" data-remove-route-option="${item.option.id}" data-option-player="${item.positionId}">Delete</button>
+          </div>
+        `).join("")
+      : `<p class="route-option-help">No saved route options yet.</p>`}
+  `;
+  els.allRouteOptions.querySelectorAll("[data-edit-route-option]").forEach(button => {
+    button.addEventListener("click", () => {
+      activeRouteSide = "offense";
+      activeRouteId = button.dataset.optionPlayer;
+      selectedRouteOptionId = button.dataset.editRouteOption;
+      playPathType = "route";
+      renderPlayControls();
+      render();
+    });
+  });
+  els.allRouteOptions.querySelectorAll("[data-remove-route-option]").forEach(button => {
+    button.addEventListener("click", () => {
+      const positionId = button.dataset.optionPlayer;
+      const option = routeOptionsFor(currentPlay(), positionId)
+        .find(candidate => candidate.id === button.dataset.removeRouteOption);
+      if (!option || !window.confirm(`Delete route option "${option.name}"?`)) return;
+      currentPlay().routeOptions[positionId] = routeOptionsFor(currentPlay(), positionId)
+        .filter(candidate => candidate.id !== option.id);
+      if (selectedRouteOptionId === option.id) selectedRouteOptionId = "base";
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlayControls();
+      render();
+    });
+  });
 }
 
 function renderPlaybookLibrary() {
@@ -763,6 +1010,11 @@ function renderPlaybookLibrary() {
         <p class="eyebrow">Saved files</p>
         <h2>Your Playbook</h2>
         <p>Open any saved play or defense to review and edit it.</p>
+        <p class="autosave-status">Autosaved in this browser${
+          localStorage.getItem(storageKeys.savedAt)
+            ? ` • Last saved ${escapeHtml(new Date(localStorage.getItem(storageKeys.savedAt)).toLocaleString())}`
+            : ""
+        }. Download a backup before clearing browser data or changing computers.</p>
       </div>
       <div class="library-heading-actions">
         <div class="library-counts">
@@ -771,7 +1023,9 @@ function renderPlaybookLibrary() {
           <span><strong>${defenses.length}</strong> Defenses</span>
         </div>
         <div class="library-transfer-actions">
-          <button id="exportPlaybookButton" class="library-action-button">Export Playbook</button>
+          <button id="saveBackupNowButton" class="library-action-button">Save Backup Now</button>
+          <button id="exportPlaybookButton" class="library-action-button">Download Backup</button>
+          <button id="restoreBackupButton" class="library-action-button">Restore Previous Backup</button>
           <label class="library-action-button import-playbook-button">
             Import Playbook
             <input id="importPlaybookInput" type="file" accept=".json,application/json">
@@ -841,18 +1095,28 @@ function renderPlaybookLibrary() {
 
   els.playbookLibrary.querySelector("#exportPlaybookButton")
     ?.addEventListener("click", exportPlaybook);
+  els.playbookLibrary.querySelector("#saveBackupNowButton")
+    ?.addEventListener("click", () => {
+      lastSavedSignature = "";
+      persistPlaybook();
+      showSaveSuccess("Backup snapshot saved");
+      renderPlaybookLibrary();
+    });
+  els.playbookLibrary.querySelector("#restoreBackupButton")
+    ?.addEventListener("click", restorePreviousBackup);
   els.playbookLibrary.querySelector("#importPlaybookInput")
     ?.addEventListener("change", importPlaybook);
 }
 
 function exportPlaybook() {
   const data = {
-    version: 1,
+    version: 2,
     exportedAt: new Date().toISOString(),
     fieldStandard,
     formations,
     plays,
-    defenses
+    defenses,
+    draftPlay
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
   const link = document.createElement("a");
@@ -864,6 +1128,31 @@ function exportPlaybook() {
   link.remove();
   URL.revokeObjectURL(link.href);
   showSaveSuccess("Playbook exported");
+}
+
+function restorePreviousBackup() {
+  const backup = readJsonStorage(storageKeys.previousSnapshot);
+  if (!backup?.formations?.length || !backup?.plays?.length || !backup?.defenses?.length) {
+    window.alert("There is no previous backup available yet.");
+    return;
+  }
+  if (!window.confirm(`Restore the backup saved ${backup.savedAt
+    ? new Date(backup.savedAt).toLocaleString()
+    : "previously"}? Your current playbook will remain as the newest recovery snapshot.`)) return;
+  const current = JSON.stringify(playbookSnapshot());
+  localStorage.setItem(storageKeys.previousSnapshot, current);
+  formations = backup.formations;
+  plays = backup.plays.map(normalizePlay);
+  defenses = backup.defenses;
+  draftPlay = null;
+  selectedPlayId = plays[0].id;
+  selectedFormationId = draftPlay?.formationId || plays[0].formationId || formations[0].id;
+  selectedDefenseId = defenses[0].id;
+  lastSavedSignature = "";
+  persistPlaybook({ rotateBackup: false });
+  renderPlayControls();
+  render();
+  showSaveSuccess("Previous backup restored");
 }
 
 async function importPlaybook(event) {
@@ -894,6 +1183,7 @@ async function importPlaybook(event) {
       labels: defense.labels || {},
       notes: Array.isArray(defense.notes) ? defense.notes : []
     }));
+    draftPlay = data.draftPlay ? normalizePlay(data.draftPlay) : null;
     selectedPlayId = plays[0].id;
     selectedFormationId = plays[0].formationId || formations[0].id;
     selectedDefenseId = defenses[0].id;
@@ -902,7 +1192,8 @@ async function importPlaybook(event) {
       fieldStandard = data.fieldStandard;
       localStorage.setItem("readroute-field-standard", fieldStandard);
     }
-    saveAllLibraries();
+    lastSavedSignature = "";
+    persistPlaybook();
     renderMarkings();
     renderPlayControls();
     render();
@@ -913,6 +1204,7 @@ async function importPlaybook(event) {
 }
 
 function openPlayEditor(playId) {
+  preserveDraftBeforeReplacement();
   selectedPlayId = playId;
   selectedFormationId = currentPlay().formationId || formations[0].id;
   draftPlay = null;
@@ -930,7 +1222,6 @@ function openPlayEditor(playId) {
 
 function openFormationEditor(formationId) {
   selectedFormationId = formationId;
-  draftPlay = null;
   appTab = "create";
   createScreen = "formation";
   activeRouteSide = "offense";
@@ -943,7 +1234,6 @@ function openFormationEditor(formationId) {
 
 function openDefenseEditor(defenseId) {
   selectedDefenseId = defenseId;
-  draftPlay = null;
   appTab = "create";
   createScreen = "defense";
   activeRouteSide = "defense";
@@ -1084,7 +1374,10 @@ function libraryPreviewMarkup() {
       ? `<line x1="${start.x}" y1="${start.y}" x2="${offensePositions[manTarget].x}" y2="${offensePositions[manTarget].y}" stroke="#c9f45c" stroke-width="2" stroke-dasharray="5 5" opacity=".7"></line>`
       : "";
     const zoneMarkup = zoneAssignment
-      ? `<circle cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" r="${zoneAssignment.radius || 130}" fill="rgba(118,215,255,.08)" stroke="#76d7ff" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></circle>`
+      ? (() => {
+          const radii = zoneRadii(zoneAssignment);
+          return `<ellipse cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" rx="${radii.x}" ry="${radii.y}" fill="rgba(118,215,255,.08)" stroke="#76d7ff" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></ellipse>`;
+        })()
       : "";
     const path = route.length
       ? `<path d="${route.length === 1 ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}` : routePathData(start, route)}" fill="none" stroke="#ed7048" stroke-width="4" stroke-dasharray="10 6" marker-end="url(#libraryDefenseArrow)"></path>`
@@ -1161,9 +1454,10 @@ function renderDefenseControls() {
     createScreen !== "defense" || defenseAssignmentMode !== "zone" || !selectedZone
   );
   if (selectedZone) {
-    const radius = String(selectedZone.radius || 130);
-    els.zoneSizeRange.value = radius;
-    els.zoneSizeInput.value = radius;
+    const radii = zoneRadii(selectedZone);
+    const size = String(Math.round(Math.max(radii.x, radii.y)));
+    els.zoneSizeRange.value = size;
+    els.zoneSizeInput.value = size;
   }
 }
 
@@ -1323,9 +1617,14 @@ function appendRoutePath(container, start, route, attributes) {
         y1: start.y,
         x2: route[0].x,
         y2: route[0].y
-      })
+    })
     : svgEl("path", { d: routePathData(start, route) });
-  Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, value));
+  element.setAttribute("class", `${attributes.class || ""} field-route-line`.trim());
+  element.setAttribute("vector-effect", "non-scaling-stroke");
+  element.setAttribute("shape-rendering", "geometricPrecision");
+  Object.entries(attributes).forEach(([key, value]) => {
+    if (key !== "class") element.setAttribute(key, value);
+  });
   container.append(element);
 }
 
@@ -1488,7 +1787,7 @@ function renderRoutesAndPlayers() {
       appendRoutePath(els.routes, snapPosition, displayedStem, {
         fill: "none",
         stroke: "#f2c35a",
-        "stroke-width": 5,
+        "stroke-width": 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
         opacity: .82,
@@ -1497,7 +1796,7 @@ function renderRoutesAndPlayers() {
       appendRoutePath(els.routes, displayedAnchor, displayedBranch, {
         fill: "none",
         stroke: "#c9f45c",
-        "stroke-width": 5,
+        "stroke-width": 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
         "stroke-dasharray": "9 6",
@@ -1509,7 +1808,7 @@ function renderRoutesAndPlayers() {
       appendRoutePath(els.routes, snapPosition, route, {
         fill: "none",
         stroke: "#f2c35a",
-        "stroke-width": activeRouteSide === "offense" && position.id === activeRouteId && playPathType === "route" ? 7 : 5,
+        "stroke-width": activeRouteSide === "offense" && position.id === activeRouteId && playPathType === "route" ? 8 : 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
         "marker-end": route.length ? "url(#arrow)" : "",
@@ -1535,7 +1834,7 @@ function renderRoutesAndPlayers() {
         appendRoutePath(els.routes, displayAnchor, displayPoints, {
           fill: "none",
           stroke: "#c9f45c",
-          "stroke-width": selected ? 6 : 4,
+          "stroke-width": selected ? 7 : 5,
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
           "stroke-dasharray": "9 6",
@@ -1772,16 +2071,36 @@ function defender(x, y, label = "") {
   const zoneAssignment = currentZoneAssignments()[id];
   if (zoneAssignment) {
     const selectedZone = activeRouteSide === "defense" && activeRouteId === id;
-    els.zones.append(svgEl("circle", {
+    const radii = zoneRadii(zoneAssignment);
+    const zoneElement = svgEl("ellipse", {
+      class: selectedZone ? "zone-draggable" : "",
       cx: zoneAssignment.x,
       cy: zoneAssignment.y,
-      r: zoneAssignment.radius || 130,
+      rx: radii.x,
+      ry: radii.y,
       fill: "rgba(118,215,255,.08)",
       stroke: "#76d7ff",
       "stroke-width": selectedZone ? 3 : 2,
       "stroke-dasharray": "8 7",
       opacity: selectedZone ? .78 : .42
-    }));
+    });
+    if (selectedZone && appTab === "create" && createScreen === "defense"
+      && defenseAssignmentMode === "zone") {
+      zoneElement.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const point = eventToFieldPoint(event);
+        els.field.setPointerCapture(event.pointerId);
+        dragState = {
+          side: "zone-move",
+          zone: zoneAssignment,
+          pointerId: event.pointerId,
+          offsetX: point.x - zoneAssignment.x,
+          offsetY: point.y - zoneAssignment.y
+        };
+      });
+    }
+    els.zones.append(zoneElement);
     els.zones.append(svgEl("line", {
       x1: playerPosition.x,
       y1: playerPosition.y,
@@ -1792,6 +2111,35 @@ function defender(x, y, label = "") {
       "stroke-dasharray": "4 6",
       opacity: selectedZone ? .75 : .3
     }));
+    if (selectedZone && appTab === "create" && createScreen === "defense"
+      && defenseAssignmentMode === "zone") {
+      [
+        { kind: "horizontal", x: zoneAssignment.x + radii.x, y: zoneAssignment.y },
+        { kind: "vertical", x: zoneAssignment.x, y: zoneAssignment.y + radii.y },
+        { kind: "uniform", x: zoneAssignment.x + radii.x, y: zoneAssignment.y + radii.y }
+      ].forEach(handleData => {
+        const handle = svgEl("circle", {
+          class: `zone-resize-handle ${handleData.kind}`,
+          cx: handleData.x,
+          cy: handleData.y,
+          r: 8
+        });
+        handle.addEventListener("pointerdown", event => {
+          event.preventDefault();
+          event.stopPropagation();
+          els.field.setPointerCapture(event.pointerId);
+          dragState = {
+            side: "zone-resize",
+            zone: zoneAssignment,
+            kind: handleData.kind,
+            pointerId: event.pointerId,
+            startRadii: radii,
+            startPoint: eventToFieldPoint(event)
+          };
+        });
+        els.zones.append(handle);
+      });
+    }
   }
   if (manTarget) {
     const targetPoint = offensePosition(manTarget);
@@ -2041,9 +2389,7 @@ function noteDimensions(text) {
 }
 
 function saveAllLibraries() {
-  savePlays();
-  saveFormations();
-  saveDefenses();
+  scheduleAutosave();
 }
 
 function inferRouteTags(position, route) {
@@ -2157,7 +2503,9 @@ function render() {
     : createScreen === "defense" && defenseAssignmentMode === "man"
       ? "Click a defender, then click the receiver or back they guard."
     : createScreen === "defense" && defenseAssignmentMode === "zone"
-      ? "Click the field to place the selected defender's reactive zone."
+      ? currentDefense().zoneAssignments?.[activeRouteId]
+        ? "Drag the zone to move it. Pull a side handle for an oval or the corner handle to scale it."
+        : "Click the field to place the selected defender's reactive zone."
     : createScreen === "play" && playPathType === "motion"
       ? "Click the field to draw pre-snap motion. The route will begin where the motion ends."
     : createScreen === "play" && selectedRouteOptionId !== "base"
@@ -2220,8 +2568,9 @@ document.querySelector("#savePlayButton").addEventListener("click", () => {
     selectedPlayId = draftPlay.id;
     draftPlay = null;
   }
-  savePlays();
-  showSaveSuccess();
+  lastSavedSignature = "";
+  const saved = persistPlaybook();
+  showSaveSuccess(saved ? "Play saved successfully" : "Save failed - download a backup");
   renderPlayControls();
   render();
 });
@@ -2269,6 +2618,7 @@ els.fieldStandardSelect.addEventListener("change", event => {
 });
 
 document.querySelector("#newPlayButton").addEventListener("click", () => {
+  preserveDraftBeforeReplacement();
   createScreen = "play";
   appTab = "create";
   animationState = null;
@@ -2505,7 +2855,8 @@ els.field.addEventListener("click", event => {
     currentDefense().zoneAssignments[activeRouteId] = {
       x: point.x,
       y: point.y,
-      radius: 130
+      radiusX: 130,
+      radiusY: 130
     };
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "path") {
@@ -2529,6 +2880,43 @@ els.field.addEventListener("pointermove", event => {
   }
   if (appTab !== "create" && appTab !== "run") return;
   const point = eventToFieldPoint(event);
+  if (dragState.side === "zone-move") {
+    const radii = zoneRadii(dragState.zone);
+    dragState.zone.x = Math.max(
+      radii.x,
+      Math.min(900 - radii.x, point.x - dragState.offsetX)
+    );
+    dragState.zone.y = Math.max(
+      radii.y,
+      Math.min(620 - radii.y, point.y - dragState.offsetY)
+    );
+    renderDefense();
+    return;
+  }
+  if (dragState.side === "zone-resize") {
+    const dx = Math.abs(point.x - dragState.zone.x);
+    const dy = Math.abs(point.y - dragState.zone.y);
+    if (dragState.kind === "horizontal") {
+      dragState.zone.radiusX = Math.max(40, Math.min(300, dx));
+    } else if (dragState.kind === "vertical") {
+      dragState.zone.radiusY = Math.max(40, Math.min(300, dy));
+    } else {
+      const startDx = Math.max(1, Math.abs(dragState.startPoint.x - dragState.zone.x));
+      const startDy = Math.max(1, Math.abs(dragState.startPoint.y - dragState.zone.y));
+      const scale = Math.max(dx / startDx, dy / startDy);
+      dragState.zone.radiusX = Math.max(40, Math.min(300, dragState.startRadii.x * scale));
+      dragState.zone.radiusY = Math.max(40, Math.min(300, dragState.startRadii.y * scale));
+    }
+    delete dragState.zone.radius;
+    const size = String(Math.round(Math.max(
+      dragState.zone.radiusX,
+      dragState.zone.radiusY
+    )));
+    els.zoneSizeRange.value = size;
+    els.zoneSizeInput.value = size;
+    renderDefense();
+    return;
+  }
   if (dragState.side === "path-point") {
     const previous = dragState.index > 0
       ? dragState.path[dragState.index - 1]
@@ -2627,8 +3015,9 @@ document.querySelector("#newFormationButton").addEventListener("click", () => {
 document.querySelector("#saveFormationButton").addEventListener("click", () => {
   const formation = currentFormation();
   formation.name = els.formationName.value.trim() || "Untitled Formation";
-  saveFormations();
-  showSaveSuccess();
+  lastSavedSignature = "";
+  const saved = persistPlaybook();
+  showSaveSuccess(saved ? "Formation saved successfully" : "Save failed - download a backup");
   renderPlayControls();
   render();
 });
@@ -2664,8 +3053,9 @@ document.querySelector("#newDefenseButton").addEventListener("click", () => {
 
 document.querySelector("#saveDefenseButton").addEventListener("click", () => {
   currentDefense().name = els.defenseName.value.trim() || "Untitled Defense";
-  saveDefenses();
-  showSaveSuccess();
+  lastSavedSignature = "";
+  const saved = persistPlaybook();
+  showSaveSuccess(saved ? "Defense saved successfully" : "Save failed - download a backup");
   renderPlayControls();
   render();
 });
@@ -2820,38 +3210,55 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
 function clampToZone(point, zone) {
   const dx = point.x - zone.x;
   const dy = point.y - zone.y;
-  const distance = Math.hypot(dx, dy);
-  const radius = zone.radius || 130;
-  if (!distance || distance <= radius) return point;
+  const radii = zoneRadii(zone);
+  const distance = Math.hypot(dx / radii.x, dy / radii.y);
+  if (!distance || distance <= 1) return point;
   return {
-    x: zone.x + ((dx / distance) * radius),
-    y: zone.y + ((dy / distance) * radius)
+    x: zone.x + (dx / distance),
+    y: zone.y + (dy / distance)
   };
 }
 
-function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds) {
+function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeepHelp = false) {
   const isDeepSafety = state.start.y < lineOfScrimmage - 190;
   const reactionTime = isDeepSafety ? .42 : .24;
-  const radius = zone.radius || 130;
+  const radii = zoneRadii(zone);
   const threats = receivers
     .map(receiver => ({
       ...receiver,
-      zoneDistance: Math.hypot(receiver.x - zone.x, receiver.y - zone.y)
+      zoneDistance: zoneDistance(receiver, zone)
     }))
-    .filter(receiver => receiver.zoneDistance <= radius * 1.18)
+    .filter(receiver => receiver.zoneDistance <= 1.18)
     .sort((a, b) => {
       if (isDeepSafety) return a.y - b.y || a.zoneDistance - b.zoneDistance;
       return a.zoneDistance - b.zoneDistance;
     });
 
   let target = { ...state.start };
+  let carryingDeepThreat = false;
   if (elapsed > .8 && !threats.length) {
     target = {
       x: state.start.x + ((zone.x - state.start.x) * .25),
       y: state.start.y + ((zone.y - state.start.y) * .25)
     };
   }
-  if (elapsed >= reactionTime && threats.length) {
+  if (elapsed >= reactionTime && isDeepSafety && !hasDeepHelp) {
+    const deepestThreat = receivers
+      .filter(receiver =>
+        receiver.y < lineOfScrimmage - 55
+        && Math.abs(receiver.x - zone.x) <= radii.x * 1.75
+      )
+      .sort((a, b) => a.y - b.y)[0];
+    if (deepestThreat) {
+      carryingDeepThreat = true;
+      state.deepThreatId = deepestThreat.id;
+      target = {
+        x: deepestThreat.x,
+        y: deepestThreat.y - 30
+      };
+    }
+  }
+  if (!carryingDeepThreat && elapsed >= reactionTime && threats.length) {
     const primary = threats[0];
     if (isDeepSafety) {
       const verticalThreats = threats.filter(receiver => receiver.y < lineOfScrimmage - 85);
@@ -2873,15 +3280,15 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds) {
       };
     }
   }
-  target = clampToZone(target, zone);
+  if (!carryingDeepThreat) target = clampToZone(target, zone);
 
   const gapX = target.x - state.x;
   const gapY = target.y - state.y;
   const separation = Math.hypot(gapX, gapY);
-  const maxSpeed = isDeepSafety ? 72 : 92;
+  const maxSpeed = carryingDeepThreat ? 132 : isDeepSafety ? 78 : 92;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
-  const acceleration = isDeepSafety ? 310 : 430;
+  const acceleration = carryingDeepThreat ? 720 : isDeepSafety ? 360 : 430;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * deltaSeconds;
   const velocityRatio = velocityChange
@@ -3001,12 +3408,20 @@ function previewMovement(scope) {
             id: position.id,
             ...(animationState.offense[position.id] || editorOffensePositions()[position.id])
           }));
+          const hasDeepHelp = defensePaths.some(other =>
+            other.id !== id
+            && other.zoneAssignment
+            && other.start.y < start.y - 40
+            && Math.abs(other.zoneAssignment.x - zoneAssignment.x)
+              <= (zoneRadii(other.zoneAssignment).x + zoneRadii(zoneAssignment).x)
+          );
           animationState.defense[id] = moveZoneDefender(
             zoneState,
             zoneAssignment,
             receivers,
             elapsed - maxMotionDuration,
-            deltaSeconds
+            deltaSeconds,
+            hasDeepHelp
           );
         } else if (elapsed >= maxMotionDuration) {
           animationState.defense[id] = interpolateTimedPath(
@@ -3042,9 +3457,11 @@ document.querySelector("#previewMovementButton").addEventListener("click", () =>
 function finishPlayerDrag() {
   if (!dragState) return;
   els.field.classList.remove("scrimmage-snapping");
-  if (dragState.side === "path-point") {
+  if (dragState.side === "path-point"
+    || dragState.side === "zone-resize"
+    || dragState.side === "zone-move") {
     suppressFieldClickUntil = Date.now() + 300;
-    if (!dragState.moved) dragState.onTap?.();
+    if (dragState.side === "path-point" && !dragState.moved) dragState.onTap?.();
   }
   if (els.field.hasPointerCapture(dragState.pointerId)) {
     els.field.releasePointerCapture(dragState.pointerId);
@@ -3261,10 +3678,15 @@ document.querySelector("#defenseZoneModeButton").addEventListener("click", () =>
 function updateSelectedZoneSize(value) {
   const zone = currentDefense().zoneAssignments?.[activeRouteId];
   if (!zone) return;
-  const radius = Math.max(40, Math.min(300, Number(value) || 130));
-  zone.radius = radius;
-  els.zoneSizeRange.value = String(radius);
-  els.zoneSizeInput.value = String(radius);
+  const size = Math.max(40, Math.min(300, Number(value) || 130));
+  const radii = zoneRadii(zone);
+  const currentSize = Math.max(radii.x, radii.y);
+  const scale = size / currentSize;
+  zone.radiusX = Math.max(40, Math.min(300, radii.x * scale));
+  zone.radiusY = Math.max(40, Math.min(300, radii.y * scale));
+  delete zone.radius;
+  els.zoneSizeRange.value = String(size);
+  els.zoneSizeInput.value = String(size);
   saveDefenses();
   renderDefense();
 }
@@ -3306,13 +3728,14 @@ document.querySelector("#scenarioResetButton").addEventListener("click", () => {
 document.querySelectorAll("[data-app-tab]").forEach(button => {
   button.addEventListener("click", () => {
     appTab = button.dataset.appTab;
-    if (appTab !== "create") draftPlay = null;
     if (appTab === "create" && createScreen === "play") {
-      draftPlay = createBlankPlay("");
-      draftPlay.formationId = selectedFormationId;
-      draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
-      draftPlay.labels = structuredClone(currentFormation().labels);
-      emptyPlayPaths(draftPlay);
+      if (!draftPlay) {
+        draftPlay = createBlankPlay("");
+        draftPlay.formationId = selectedFormationId;
+        draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
+        draftPlay.labels = structuredClone(currentFormation().labels);
+        emptyPlayPaths(draftPlay);
+      }
       playPathType = "route";
       selectedRouteOptionId = "base";
       activeRouteSide = "offense";
@@ -3337,15 +3760,15 @@ document.querySelectorAll("[data-create-screen]").forEach(button => {
     boardMode = createScreen === "play" ? "draw" : "move";
     if (createScreen === "defense") defenseAssignmentMode = "path";
     if (createScreen === "play") {
-      draftPlay = createBlankPlay("");
-      draftPlay.formationId = selectedFormationId;
-      draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
-      draftPlay.labels = structuredClone(currentFormation().labels);
-      emptyPlayPaths(draftPlay);
+      if (!draftPlay) {
+        draftPlay = createBlankPlay("");
+        draftPlay.formationId = selectedFormationId;
+        draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
+        draftPlay.labels = structuredClone(currentFormation().labels);
+        emptyPlayPaths(draftPlay);
+      }
       playPathType = "route";
       selectedRouteOptionId = "base";
-    } else {
-      draftPlay = null;
     }
     document.querySelectorAll("[data-create-screen]").forEach(tab => {
       tab.classList.toggle("active", tab === button);
@@ -3355,9 +3778,66 @@ document.querySelectorAll("[data-create-screen]").forEach(button => {
   });
 });
 
-renderMarkings();
-saveFormations();
-saveDefenses();
-savePlays();
-renderPlayControls();
-render();
+["input", "change", "click"].forEach(eventName => {
+  document.addEventListener(eventName, () => scheduleAutosave());
+});
+
+let persistentStorageRequested = false;
+document.addEventListener("click", () => {
+  if (persistentStorageRequested || !navigator.storage?.persist) return;
+  persistentStorageRequested = true;
+  navigator.storage.persist().catch(() => false);
+}, { once: true });
+
+window.addEventListener("beforeunload", () => {
+  clearTimeout(autosaveTimer);
+  persistPlaybook();
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    clearTimeout(autosaveTimer);
+    persistPlaybook();
+  }
+});
+
+setInterval(() => persistPlaybook(), 15000);
+
+async function initializeApp() {
+  const hasLocalData = Boolean(
+    readJsonStorage(storageKeys.plays)?.length
+    || recoverySnapshot()?.plays?.length
+  );
+  if (!hasLocalData) {
+    const indexedBackup = await readIndexedDbSnapshot();
+    if (indexedBackup?.plays?.length
+      && indexedBackup?.formations?.length
+      && indexedBackup?.defenses?.length) {
+      plays = indexedBackup.plays.map(normalizePlay);
+      formations = indexedBackup.formations;
+      defenses = indexedBackup.defenses;
+      draftPlay = indexedBackup.draftPlay
+        ? normalizePlay(indexedBackup.draftPlay)
+        : null;
+      selectedPlayId = plays[0].id;
+      selectedFormationId = draftPlay?.formationId
+        || plays[0].formationId
+        || formations[0].id;
+      selectedDefenseId = defenses[0].id;
+      createScreen = draftPlay ? "play" : "formation";
+      if (fieldStandards[indexedBackup.fieldStandard]) {
+        fieldStandard = indexedBackup.fieldStandard;
+        localStorage.setItem("readroute-field-standard", fieldStandard);
+      }
+      showSaveSuccess("Playbook recovered from backup");
+    }
+  }
+  renderMarkings();
+  syncTabButtons();
+  renderPlayControls();
+  render();
+  lastSavedSignature = "";
+  persistPlaybook({ rotateBackup: false });
+}
+
+initializeApp();

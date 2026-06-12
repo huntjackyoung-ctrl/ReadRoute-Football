@@ -16,6 +16,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Run Plays automatically selects matching route options for the chosen defense
 - Route options branch from any clicked point on the base route
 - Multiple dotted branches can be added to the same receiver
+- All saved route options remain visible with direct edit and delete controls
 - Formations can be mirrored into a new saved left/right version
 - Plays can be mirrored into a chosen formation without changing its saved player positions
 - Separate pre-snap motion paths that animate before post-snap assignments
@@ -26,6 +27,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Draggable route, motion, and defensive movement points
 - Shift-lock for clean horizontal or vertical segments
 - Visible route line immediately after the first route point
+- Consistent route line thickness on short and long segments
 - Per-route undo and clear controls
 - Draw/Move board modes
 - Drag repositioning for all 22 players
@@ -41,7 +43,8 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Run-play choices filtered to plays manually created for the selected formation
 - Custom defender movement paths
 - Reactive zone defenders that hold leverage and respond to receivers entering their area
-- Adjustable zone sizes for each defender
+- Deep safeties carry the deepest threat when no defender provides help over the top
+- Adjustable zone sizes for each defender with slider, typed value, and draggable circle/oval handles
 - In-editor previews for newly drawn offensive routes and defensive movement
 - Defense editor hides offensive route lines
 - Reusable named defenses with saved alignments and movement
@@ -57,6 +60,10 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Equal movement speed across every offensive and defensive path
 - Dedicated Playbook tab with formation, play, and defense folders
 - Full playbook export/import for moving saved work between browsers and computers
+- Immediate autosaving after every edit
+- Rotating recovery snapshots plus a secondary browser database backup
+- Recovery of unfinished play drafts after refresh or accidental closure
+- Manual snapshot restore and downloadable JSON backups
 - Read-only diagrams when selecting files in the Playbook tab
 - Run speeds at 100%, 75%, 50%, 25%, and 10%
 - Temporary Run Plays scenario editing for player starts and movement paths

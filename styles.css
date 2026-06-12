@@ -212,6 +212,13 @@ button, select { cursor: pointer; }
   color: var(--muted);
   font-size: 12px;
 }
+.library-heading > div > p.autosave-status {
+  max-width: 620px;
+  margin-top: 7px;
+  color: var(--green);
+  font-size: 10px;
+  font-weight: 750;
+}
 .library-counts { display: flex; gap: 10px; }
 .library-heading-actions {
   display: grid;
@@ -615,6 +622,39 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rg
   font-size: 10px;
   line-height: 1.45;
 }
+.all-route-options {
+  margin-top: 13px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+.all-route-options-title {
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+}
+.route-option-file {
+  margin-bottom: 6px;
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: 5px;
+  align-items: center;
+}
+.route-option-file span {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 10px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.route-option-file button {
+  padding: 5px 7px;
+  font-size: 9px;
+}
+.route-option-file.active span { color: var(--green); }
 .mirror-action {
   width: 100%;
   margin-top: 8px;
@@ -848,6 +888,23 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   padding: 8px 9px;
   text-align: center;
 }
+.zone-resize-help {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 750;
+  line-height: 1.35;
+}
+.zone-resize-handle {
+  fill: #fff;
+  stroke: #76d7ff;
+  stroke-width: 3;
+  vector-effect: non-scaling-stroke;
+}
+.zone-resize-handle.horizontal { cursor: ew-resize; }
+.zone-resize-handle.vertical { cursor: ns-resize; }
+.zone-resize-handle.uniform { cursor: nwse-resize; }
+.zone-draggable { cursor: move; }
 .defense-label-editor {
   margin: 17px 0;
   padding-top: 15px;
@@ -943,6 +1000,10 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   cursor: pointer;
 }
 .drawing-guide { pointer-events: none; }
+.field-route-line {
+  vector-effect: non-scaling-stroke;
+  shape-rendering: geometricPrecision;
+}
 .selected-player {
   filter: drop-shadow(0 0 7px rgba(201,244,92,.9));
 }
