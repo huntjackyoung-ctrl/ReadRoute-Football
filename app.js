@@ -24,6 +24,8 @@ const storageKeys = {
   snapshot: "readroute-playbook-snapshot",
   previousSnapshot: "readroute-playbook-snapshot-previous",
   draft: "readroute-play-draft",
+  folders: "readroute-custom-folders",
+  folderAssignments: "readroute-folder-assignments",
   savedAt: "readroute-last-saved-at"
 };
 
@@ -97,6 +99,8 @@ function createBlankDefense(name = "Untitled Defense", labels = {}) {
 let plays = loadPlays();
 let formations = loadFormations();
 let defenses = loadDefenses();
+let libraryFolders = loadLibraryFolders();
+let libraryAssignments = loadLibraryAssignments();
 let recoveredDraft = loadDraftPlay();
 let selectedPlayId = plays[0].id;
 let draftPlay = recoveredDraft;
@@ -339,14 +343,36 @@ function loadDraftPlay() {
   return recovered ? normalizePlay(recovered) : null;
 }
 
+function loadLibraryFolders() {
+  const saved = readJsonStorage(storageKeys.folders);
+  const recovered = Array.isArray(saved) ? saved : recoverySnapshot()?.libraryFolders;
+  return Array.isArray(recovered)
+    ? recovered.filter(folder => folder?.id && folder?.name).map(folder => ({
+        id: folder.id,
+        name: String(folder.name),
+        parentId: folder.parentId || null
+      }))
+    : [];
+}
+
+function loadLibraryAssignments() {
+  const saved = readJsonStorage(storageKeys.folderAssignments);
+  const recovered = saved && typeof saved === "object"
+    ? saved
+    : recoverySnapshot()?.libraryAssignments;
+  return recovered && typeof recovered === "object" ? recovered : {};
+}
+
 function playbookSnapshot() {
   return {
-    version: 2,
+    version: 3,
     savedAt: new Date().toISOString(),
     fieldStandard,
     formations,
     plays,
     defenses,
+    libraryFolders,
+    libraryAssignments,
     draftPlay: draftPlay ? structuredClone(draftPlay) : null
   };
 }
@@ -407,6 +433,8 @@ function persistPlaybook({ rotateBackup = true } = {}) {
       formations,
       plays,
       defenses,
+      libraryFolders,
+      libraryAssignments,
       draftPlay,
       fieldStandard
     });
@@ -419,6 +447,8 @@ function persistPlaybook({ rotateBackup = true } = {}) {
     localStorage.setItem(storageKeys.plays, JSON.stringify(plays));
     localStorage.setItem(storageKeys.formations, JSON.stringify(formations));
     localStorage.setItem(storageKeys.defenses, JSON.stringify(defenses));
+    localStorage.setItem(storageKeys.folders, JSON.stringify(libraryFolders));
+    localStorage.setItem(storageKeys.folderAssignments, JSON.stringify(libraryAssignments));
     localStorage.setItem(storageKeys.snapshot, JSON.stringify(snapshot));
     localStorage.setItem(storageKeys.savedAt, snapshot.savedAt);
     if (draftPlay) {
@@ -961,6 +991,116 @@ function renderRouteOptionControls() {
   });
 }
 
+function libraryItemKey(type, id) {
+  return `${type}:${id}`;
+}
+
+function libraryItems() {
+  return [
+    ...formations.map(item => ({ type: "formation", id: item.id, name: item.name, icon: "F" })),
+    ...plays.map(item => ({ type: "play", id: item.id, name: item.name, icon: "P" })),
+    ...defenses.map(item => ({ type: "defense", id: item.id, name: item.name, icon: "D" }))
+  ];
+}
+
+function folderOptionMarkup(selectedId = "") {
+  const options = [`<option value="">Unfiled</option>`];
+  function appendOptions(parentId = null, depth = 0) {
+    libraryFolders
+      .filter(folder => folder.parentId === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .forEach(folder => {
+        options.push(`<option value="${folder.id}" ${selectedId === folder.id ? "selected" : ""}>${"&nbsp;&nbsp;".repeat(depth)}${escapeHtml(folder.name)}</option>`);
+        appendOptions(folder.id, depth + 1);
+      });
+  }
+  appendOptions();
+  return options.join("");
+}
+
+function customLibraryFileMarkup(item) {
+  const key = libraryItemKey(item.type, item.id);
+  const previewAttribute = item.type === "play"
+    ? `data-library-play="${item.id}"`
+    : item.type === "defense"
+      ? `data-library-defense="${item.id}"`
+      : "";
+  const editAttribute = `data-edit-${item.type}="${item.id}"`;
+  return `
+    <div class="custom-library-file" draggable="true" data-drag-library-item="${key}">
+      <button class="library-file ${item.type === "defense" ? "defense-file" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
+        <span class="library-file-icon">${item.icon}</span>
+        <span>${escapeHtml(item.name)}</span>
+      </button>
+      ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
+      <select class="library-move-select" data-library-item="${key}" aria-label="Move ${escapeHtml(item.name)} to folder">
+        ${folderOptionMarkup(libraryAssignments[key] || "")}
+      </select>
+    </div>
+  `;
+}
+
+function customFolderMarkup(folder, depth = 0) {
+  const children = libraryFolders
+    .filter(candidate => candidate.parentId === folder.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const items = libraryItems()
+    .filter(item => libraryAssignments[libraryItemKey(item.type, item.id)] === folder.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return `
+    <details class="custom-library-folder" open style="--folder-depth:${depth}" data-folder-drop="${folder.id}">
+      <summary>
+        <span class="library-folder-icon">F</span>
+        <span>${escapeHtml(folder.name)}</span>
+        <small>${children.length + items.length}</small>
+      </summary>
+      <div class="custom-folder-actions">
+        <button class="library-action-button" data-add-subfolder="${folder.id}">+ Subfolder</button>
+        <button class="library-action-button" data-rename-folder="${folder.id}">Rename</button>
+        <button class="library-action-button danger" data-delete-folder="${folder.id}">Delete</button>
+      </div>
+      <div class="custom-folder-content">
+        ${children.map(child => customFolderMarkup(child, depth + 1)).join("")}
+        ${items.map(customLibraryFileMarkup).join("")}
+        ${!children.length && !items.length ? `<p class="library-empty">This folder is empty.</p>` : ""}
+      </div>
+    </details>
+  `;
+}
+
+function customFolderBrowserMarkup() {
+  const roots = libraryFolders
+    .filter(folder => !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const unfiled = libraryItems()
+    .filter(item => !libraryAssignments[libraryItemKey(item.type, item.id)]
+      || !libraryFolders.some(folder => folder.id === libraryAssignments[libraryItemKey(item.type, item.id)]))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return `
+    <section class="custom-folder-browser">
+      <div class="custom-folder-heading">
+        <div>
+          <p class="eyebrow">Custom organization</p>
+          <h3>Folders</h3>
+          <p class="custom-folder-help">Drag a file onto a folder, or use its folder menu.</p>
+        </div>
+        <button id="addRootFolderButton" class="library-action-button">+ New Folder</button>
+      </div>
+      ${roots.map(folder => customFolderMarkup(folder)).join("")}
+      <details class="custom-library-folder unfiled-folder" open data-folder-drop="">
+        <summary>
+          <span class="library-folder-icon">U</span>
+          <span>Unfiled</span>
+          <small>${unfiled.length}</small>
+        </summary>
+        <div class="custom-folder-content">
+          ${unfiled.length ? unfiled.map(customLibraryFileMarkup).join("") : `<p class="library-empty">Everything is filed.</p>`}
+        </div>
+      </details>
+    </section>
+  `;
+}
+
 function renderPlaybookLibrary() {
   const formationFolders = formations.map(formation => {
     const formationPlays = plays.filter(play => play.formationId === formation.id);
@@ -1035,6 +1175,7 @@ function renderPlaybookLibrary() {
     </div>
     <div class="library-browser">
       <div class="library-files">
+        ${customFolderBrowserMarkup()}
         <div class="library-column">
           <p class="eyebrow">Offense</p>
           ${formationFolders}
@@ -1093,6 +1234,66 @@ function renderPlaybookLibrary() {
     button.addEventListener("click", () => deleteSavedDefense(button.dataset.deleteDefense));
   });
 
+  els.playbookLibrary.querySelector("#addRootFolderButton")
+    ?.addEventListener("click", () => createLibraryFolder(null));
+  els.playbookLibrary.querySelectorAll("[data-add-subfolder]").forEach(button => {
+    button.addEventListener("click", () => createLibraryFolder(button.dataset.addSubfolder));
+  });
+  els.playbookLibrary.querySelectorAll("[data-rename-folder]").forEach(button => {
+    button.addEventListener("click", () => renameLibraryFolder(button.dataset.renameFolder));
+  });
+  els.playbookLibrary.querySelectorAll("[data-delete-folder]").forEach(button => {
+    button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
+  });
+  els.playbookLibrary.querySelectorAll("[data-library-item]").forEach(select => {
+    select.addEventListener("change", () => {
+      if (select.value) {
+        libraryAssignments[select.dataset.libraryItem] = select.value;
+      } else {
+        delete libraryAssignments[select.dataset.libraryItem];
+      }
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlaybookLibrary();
+      showSaveSuccess("Moved successfully");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-drag-library-item]").forEach(row => {
+    row.addEventListener("dragstart", event => {
+      event.dataTransfer.effectAllowed = "move";
+      event.dataTransfer.setData("text/plain", row.dataset.dragLibraryItem);
+      row.classList.add("dragging");
+    });
+    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+  });
+  els.playbookLibrary.querySelectorAll("[data-folder-drop]").forEach(folder => {
+    folder.addEventListener("dragover", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      folder.classList.add("drop-target");
+    });
+    folder.addEventListener("dragleave", event => {
+      if (!folder.contains(event.relatedTarget)) folder.classList.remove("drop-target");
+    });
+    folder.addEventListener("drop", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      const key = event.dataTransfer.getData("text/plain");
+      const folderId = folder.dataset.folderDrop;
+      if (!key) return;
+      if (folderId) {
+        libraryAssignments[key] = folderId;
+      } else {
+        delete libraryAssignments[key];
+      }
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlaybookLibrary();
+      showSaveSuccess("Moved successfully");
+    });
+  });
+
   els.playbookLibrary.querySelector("#exportPlaybookButton")
     ?.addEventListener("click", exportPlaybook);
   els.playbookLibrary.querySelector("#saveBackupNowButton")
@@ -1108,14 +1309,69 @@ function renderPlaybookLibrary() {
     ?.addEventListener("change", importPlaybook);
 }
 
+function createLibraryFolder(parentId) {
+  const parent = parentId
+    ? libraryFolders.find(folder => folder.id === parentId)
+    : null;
+  const name = window.prompt(
+    parent ? `Name the subfolder inside "${parent.name}":` : "Name the new playbook folder:"
+  )?.trim();
+  if (!name) return;
+  libraryFolders.push({
+    id: crypto.randomUUID(),
+    name: name.slice(0, 50),
+    parentId: parent?.id || null
+  });
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder created");
+}
+
+function renameLibraryFolder(folderId) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder) return;
+  const name = window.prompt("Rename folder:", folder.name)?.trim();
+  if (!name) return;
+  folder.name = name.slice(0, 50);
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder renamed");
+}
+
+function deleteLibraryFolder(folderId) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder || !window.confirm(`Delete folder "${folder.name}"? Its contents will move up one level.`)) return;
+  const destinationId = folder.parentId || null;
+  libraryFolders.forEach(candidate => {
+    if (candidate.parentId === folderId) candidate.parentId = destinationId;
+  });
+  Object.entries(libraryAssignments).forEach(([key, assignedFolderId]) => {
+    if (assignedFolderId !== folderId) return;
+    if (destinationId) {
+      libraryAssignments[key] = destinationId;
+    } else {
+      delete libraryAssignments[key];
+    }
+  });
+  libraryFolders = libraryFolders.filter(candidate => candidate.id !== folderId);
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder deleted; contents moved up");
+}
+
 function exportPlaybook() {
   const data = {
-    version: 2,
+    version: 3,
     exportedAt: new Date().toISOString(),
     fieldStandard,
     formations,
     plays,
     defenses,
+    libraryFolders,
+    libraryAssignments,
     draftPlay
   };
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -1144,6 +1400,10 @@ function restorePreviousBackup() {
   formations = backup.formations;
   plays = backup.plays.map(normalizePlay);
   defenses = backup.defenses;
+  libraryFolders = Array.isArray(backup.libraryFolders) ? backup.libraryFolders : [];
+  libraryAssignments = backup.libraryAssignments && typeof backup.libraryAssignments === "object"
+    ? backup.libraryAssignments
+    : {};
   draftPlay = null;
   selectedPlayId = plays[0].id;
   selectedFormationId = draftPlay?.formationId || plays[0].formationId || formations[0].id;
@@ -1183,6 +1443,16 @@ async function importPlaybook(event) {
       labels: defense.labels || {},
       notes: Array.isArray(defense.notes) ? defense.notes : []
     }));
+    libraryFolders = Array.isArray(data.libraryFolders)
+      ? data.libraryFolders.filter(folder => folder?.id && folder?.name).map(folder => ({
+          id: folder.id,
+          name: String(folder.name),
+          parentId: folder.parentId || null
+        }))
+      : [];
+    libraryAssignments = data.libraryAssignments && typeof data.libraryAssignments === "object"
+      ? data.libraryAssignments
+      : {};
     draftPlay = data.draftPlay ? normalizePlay(data.draftPlay) : null;
     selectedPlayId = plays[0].id;
     selectedFormationId = plays[0].formationId || formations[0].id;
@@ -1250,6 +1520,7 @@ function deleteSavedPlay(playId) {
   const play = plays.find(item => item.id === playId);
   if (!play || !window.confirm(`Delete "${play.name}"?`)) return;
   plays = plays.filter(item => item.id !== playId);
+  delete libraryAssignments[libraryItemKey("play", playId)];
   if (selectedPlayId === playId) selectedPlayId = plays[0].id;
   if (libraryPreview.type === "play" && libraryPreview.id === playId) {
     libraryPreview = { type: "play", id: plays[0].id };
@@ -1269,6 +1540,7 @@ function deleteSavedFormation(formationId) {
   }
   if (!window.confirm(`Delete formation "${formation.name}"?`)) return;
   formations = formations.filter(item => item.id !== formationId);
+  delete libraryAssignments[libraryItemKey("formation", formationId)];
   if (selectedFormationId === formationId) selectedFormationId = formations[0].id;
   saveFormations();
   renderPlayControls();
@@ -1280,6 +1552,7 @@ function deleteSavedDefense(defenseId) {
   const defense = defenses.find(item => item.id === defenseId);
   if (!defense || !window.confirm(`Delete "${defense.name}"?`)) return;
   defenses = defenses.filter(item => item.id !== defenseId);
+  delete libraryAssignments[libraryItemKey("defense", defenseId)];
   [...plays, ...(draftPlay ? [draftPlay] : [])].forEach(play => {
     skillPositions.forEach(position => {
       routeOptionsFor(play, position.id).forEach(option => {
@@ -2327,6 +2600,25 @@ function renderNotes() {
       });
       const editor = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
       editor.className = "note-editor";
+      const moveButton = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
+      moveButton.type = "button";
+      moveButton.className = "note-move-button";
+      moveButton.textContent = "Drag note";
+      moveButton.title = "Drag note";
+      moveButton.setAttribute("aria-label", "Drag note");
+      moveButton.addEventListener("pointerdown", event => {
+        event.preventDefault();
+        event.stopPropagation();
+        const point = eventToFieldPoint(event);
+        els.field.setPointerCapture(event.pointerId);
+        dragState = {
+          side: "note",
+          note,
+          pointerId: event.pointerId,
+          offsetX: point.x - note.x,
+          offsetY: point.y - note.y
+        };
+      });
       const textarea = document.createElementNS("http://www.w3.org/1999/xhtml", "textarea");
       textarea.value = note.text;
       textarea.placeholder = "Type a note";
@@ -2365,7 +2657,7 @@ function renderNotes() {
         saveAllLibraries();
         renderNotes();
       });
-      editor.append(textarea, removeButton);
+      editor.append(moveButton, textarea, removeButton);
       foreignObject.append(editor);
       group.append(foreignObject);
     } else {
@@ -3229,6 +3521,7 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   const isDeepSafety = state.start.y < lineOfScrimmage - 190;
   const reactionTime = isDeepSafety ? .42 : .24;
   const radii = zoneRadii(zone);
+  const deepThreatLine = Math.min(state.start.y + 25, zone.y + (radii.y * .2));
   const threats = receivers
     .map(receiver => ({
       ...receiver,
@@ -3251,7 +3544,7 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   if (elapsed >= reactionTime && isDeepSafety && !hasDeepHelp) {
     const deepestThreat = receivers
       .filter(receiver =>
-        receiver.y < lineOfScrimmage - 55
+        receiver.y <= deepThreatLine
         && Math.abs(receiver.x - zone.x) <= radii.x * 1.75
       )
       .sort((a, b) => a.y - b.y)[0];
@@ -3260,7 +3553,7 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
       state.deepThreatId = deepestThreat.id;
       target = {
         x: deepestThreat.x,
-        y: deepestThreat.y - 30
+        y: Math.min(deepThreatLine, deepestThreat.y - 30)
       };
     }
   }
@@ -3277,7 +3570,7 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
         : primary.x;
       target = {
         x: zone.x + ((midpointX - zone.x) * .68),
-        y: Math.min(zone.y + 35, primary.y - 34)
+        y: Math.min(deepThreatLine, primary.y - 34)
       };
     } else {
       target = {
@@ -3305,6 +3598,10 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   state.vy += (desiredVy - state.vy) * velocityRatio;
   state.x += state.vx * deltaSeconds;
   state.y += state.vy * deltaSeconds;
+  if (isDeepSafety && state.y > deepThreatLine) {
+    state.y = deepThreatLine;
+    state.vy = Math.min(0, state.vy);
+  }
   return { x: state.x, y: state.y };
 }
 
@@ -3822,6 +4119,13 @@ async function initializeApp() {
       plays = indexedBackup.plays.map(normalizePlay);
       formations = indexedBackup.formations;
       defenses = indexedBackup.defenses;
+      libraryFolders = Array.isArray(indexedBackup.libraryFolders)
+        ? indexedBackup.libraryFolders
+        : [];
+      libraryAssignments = indexedBackup.libraryAssignments
+        && typeof indexedBackup.libraryAssignments === "object"
+        ? indexedBackup.libraryAssignments
+        : {};
       draftPlay = indexedBackup.draftPlay
         ? normalizePlay(indexedBackup.draftPlay)
         : null;

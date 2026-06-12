@@ -50,7 +50,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Reusable named defenses with saved alignments and movement
 - Editable labels for all 11 defensive players
 - Blank 11-player defensive canvas with no coverage templates
-- Draggable field notes with isolated text editing, selection, and delete controls
+- Draggable field notes with a dedicated top-bar drag control plus isolated text editing and deletion
 - Auto-growing note boxes with compact top-right delete controls
 - New formations and defenses inherit player labels from the first saved setup
 - Smaller route and defensive movement arrowheads
@@ -59,6 +59,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Play/Reset animation for offense and defense
 - Equal movement speed across every offensive and defensive path
 - Dedicated Playbook tab with formation, play, and defense folders
+- Custom Playbook folders with nested subfolders, drag-and-drop filing, and move menus
 - Full playbook export/import for moving saved work between browsers and computers
 - Immediate autosaving after every edit
 - Rotating recovery snapshots plus a secondary browser database backup
