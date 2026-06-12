@@ -903,7 +903,6 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
 }
 .zone-resize-handle.horizontal { cursor: ew-resize; }
 .zone-resize-handle.vertical { cursor: ns-resize; }
-.zone-resize-handle.uniform { cursor: nwse-resize; }
 .zone-draggable { cursor: move; }
 .defense-label-editor {
   margin: 17px 0;

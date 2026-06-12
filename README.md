@@ -44,7 +44,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Custom defender movement paths
 - Reactive zone defenders that hold leverage and respond to receivers entering their area
 - Deep safeties carry the deepest threat when no defender provides help over the top
-- Adjustable zone sizes for each defender with slider, typed value, and draggable circle/oval handles
+- Adjustable zone sizes for each defender with slider, typed value, and draggable top, bottom, left, and right handles
 - In-editor previews for newly drawn offensive routes and defensive movement
 - Defense editor hides offensive route lines
 - Reusable named defenses with saved alignments and movement

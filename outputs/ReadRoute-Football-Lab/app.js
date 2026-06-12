@@ -2114,12 +2114,13 @@ function defender(x, y, label = "") {
     if (selectedZone && appTab === "create" && createScreen === "defense"
       && defenseAssignmentMode === "zone") {
       [
-        { kind: "horizontal", x: zoneAssignment.x + radii.x, y: zoneAssignment.y },
-        { kind: "vertical", x: zoneAssignment.x, y: zoneAssignment.y + radii.y },
-        { kind: "uniform", x: zoneAssignment.x + radii.x, y: zoneAssignment.y + radii.y }
+        { kind: "horizontal", direction: "left", x: zoneAssignment.x - radii.x, y: zoneAssignment.y },
+        { kind: "horizontal", direction: "right", x: zoneAssignment.x + radii.x, y: zoneAssignment.y },
+        { kind: "vertical", direction: "top", x: zoneAssignment.x, y: zoneAssignment.y - radii.y },
+        { kind: "vertical", direction: "bottom", x: zoneAssignment.x, y: zoneAssignment.y + radii.y }
       ].forEach(handleData => {
         const handle = svgEl("circle", {
-          class: `zone-resize-handle ${handleData.kind}`,
+          class: `zone-resize-handle ${handleData.kind} ${handleData.direction}`,
           cx: handleData.x,
           cy: handleData.y,
           r: 8
@@ -2132,9 +2133,8 @@ function defender(x, y, label = "") {
             side: "zone-resize",
             zone: zoneAssignment,
             kind: handleData.kind,
-            pointerId: event.pointerId,
-            startRadii: radii,
-            startPoint: eventToFieldPoint(event)
+            direction: handleData.direction,
+            pointerId: event.pointerId
           };
         });
         els.zones.append(handle);
@@ -2504,7 +2504,7 @@ function render() {
       ? "Click a defender, then click the receiver or back they guard."
     : createScreen === "defense" && defenseAssignmentMode === "zone"
       ? currentDefense().zoneAssignments?.[activeRouteId]
-        ? "Drag the zone to move it. Pull a side handle for an oval or the corner handle to scale it."
+        ? "Drag the zone to move it. Pull its top, bottom, left, or right point to reshape it."
         : "Click the field to place the selected defender's reactive zone."
     : createScreen === "play" && playPathType === "motion"
       ? "Click the field to draw pre-snap motion. The route will begin where the motion ends."
@@ -2852,11 +2852,14 @@ els.field.addEventListener("click", event => {
     delete currentDefense().manAssignments[activeRouteId];
     currentDefense().routes[activeRouteId] = [];
     const point = eventToFieldPoint(event);
+    const existingZone = currentDefense().zoneAssignments[activeRouteId];
+    const radii = zoneRadii(existingZone);
     currentDefense().zoneAssignments[activeRouteId] = {
-      x: point.x,
-      y: point.y,
-      radiusX: 130,
-      radiusY: 130
+      ...existingZone,
+      x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
+      y: Math.max(radii.y, Math.min(620 - radii.y, point.y)),
+      radiusX: radii.x,
+      radiusY: radii.y
     };
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "path") {
@@ -2898,14 +2901,8 @@ els.field.addEventListener("pointermove", event => {
     const dy = Math.abs(point.y - dragState.zone.y);
     if (dragState.kind === "horizontal") {
       dragState.zone.radiusX = Math.max(40, Math.min(300, dx));
-    } else if (dragState.kind === "vertical") {
-      dragState.zone.radiusY = Math.max(40, Math.min(300, dy));
     } else {
-      const startDx = Math.max(1, Math.abs(dragState.startPoint.x - dragState.zone.x));
-      const startDy = Math.max(1, Math.abs(dragState.startPoint.y - dragState.zone.y));
-      const scale = Math.max(dx / startDx, dy / startDy);
-      dragState.zone.radiusX = Math.max(40, Math.min(300, dragState.startRadii.x * scale));
-      dragState.zone.radiusY = Math.max(40, Math.min(300, dragState.startRadii.y * scale));
+      dragState.zone.radiusY = Math.max(40, Math.min(300, dy));
     }
     delete dragState.zone.radius;
     const size = String(Math.round(Math.max(
