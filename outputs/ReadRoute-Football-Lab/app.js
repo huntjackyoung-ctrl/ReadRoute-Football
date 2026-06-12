@@ -152,6 +152,9 @@ const els = {
   saveToast: document.querySelector("#saveToast"),
   scenarioStatus: document.querySelector("#scenarioStatus"),
   defensePathHelp: document.querySelector("#defensePathHelp"),
+  zoneSizeControl: document.querySelector("#zoneSizeControl"),
+  zoneSizeRange: document.querySelector("#zoneSizeRange"),
+  zoneSizeValue: document.querySelector("#zoneSizeValue"),
   routeOptionsEditor: document.querySelector("#routeOptionsEditor"),
   routeOptionPlayer: document.querySelector("#routeOptionPlayer"),
   routeOptionSelect: document.querySelector("#routeOptionSelect"),
@@ -1150,6 +1153,17 @@ function renderDefenseControls() {
   ).join("");
   els.defenseSelect.value = selectedDefenseId;
   els.defenseName.value = currentDefense().name;
+  const selectedZone = activeRouteSide === "defense"
+    ? currentDefense().zoneAssignments?.[activeRouteId]
+    : null;
+  els.zoneSizeControl.classList.toggle(
+    "hidden",
+    createScreen !== "defense" || defenseAssignmentMode !== "zone" || !selectedZone
+  );
+  if (selectedZone) {
+    els.zoneSizeRange.value = String(selectedZone.radius || 125);
+    els.zoneSizeValue.textContent = String(selectedZone.radius || 125);
+  }
 }
 
 function renderRunControls() {
@@ -2492,7 +2506,7 @@ els.field.addEventListener("click", event => {
     currentDefense().zoneAssignments[activeRouteId] = {
       x: point.x,
       y: point.y,
-      radius: depth > 220 ? 230 : depth > 120 ? 180 : 145
+      radius: depth > 220 ? 180 : depth > 120 ? 145 : 115
     };
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "path") {
@@ -3243,6 +3257,15 @@ document.querySelector("#defenseZoneModeButton").addEventListener("click", () =>
   activeRouteSide = "defense";
   if (!String(activeRouteId).startsWith("D")) activeRouteId = "D0";
   render();
+});
+
+els.zoneSizeRange.addEventListener("input", event => {
+  const zone = currentDefense().zoneAssignments?.[activeRouteId];
+  if (!zone) return;
+  zone.radius = Number(event.target.value);
+  els.zoneSizeValue.textContent = event.target.value;
+  saveDefenses();
+  renderDefense();
 });
 
 document.querySelector("#defenseManModeButton").addEventListener("click", () => {

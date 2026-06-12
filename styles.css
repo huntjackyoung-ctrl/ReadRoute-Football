@@ -816,6 +816,28 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   border-color: var(--lime);
   background: var(--lime);
 }
+.zone-size-control {
+  margin: 10px 0;
+  padding: 9px;
+  display: block;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: #fff;
+}
+.zone-size-control.hidden { display: none; }
+.zone-size-control span {
+  display: flex;
+  justify-content: space-between;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+.zone-size-control input {
+  width: 100%;
+  margin-top: 7px;
+  padding: 0;
+  accent-color: var(--green);
+}
 .defense-label-editor {
   margin: 17px 0;
   padding-top: 15px;

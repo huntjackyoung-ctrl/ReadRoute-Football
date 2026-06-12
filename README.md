@@ -41,6 +41,7 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Run-play choices filtered to plays manually created for the selected formation
 - Custom defender movement paths
 - Reactive zone defenders that hold leverage and respond to receivers entering their area
+- Adjustable zone sizes for each defender
 - In-editor previews for newly drawn offensive routes and defensive movement
 - Defense editor hides offensive route lines
 - Reusable named defenses with saved alignments and movement
