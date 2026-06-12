@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#091611">
+  <title>ReadRoute Football Lab</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="ReadRoute home">
+      <span class="brand-mark">RR</span>
+      <span>
+        <strong>READROUTE</strong>
+        <small>FOOTBALL LAB</small>
+      </span>
+    </a>
+    <nav class="mode-tabs" aria-label="Workspace">
+      <button class="mode-tab active" data-app-tab="create">Create</button>
+      <button class="mode-tab" data-app-tab="run">Run Plays</button>
+      <button class="mode-tab" data-app-tab="playbook">Playbook</button>
+    </nav>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">Interactive playbook</p>
+        <h1>See the coverage.<br><em>Find the answer.</em></h1>
+        <p class="hero-copy">Build the play, set the defense, and learn why each route wins or loses.</p>
+      </div>
+      <div class="hero-stat">
+        <span id="playCount">1</span>
+        <small>PLAYS IN<br>YOUR BOOK</small>
+      </div>
+    </section>
+
+    <nav id="createSubnav" class="create-subnav" aria-label="Create tools">
+      <button class="create-subtab active" data-create-screen="formation">Create Formation</button>
+      <button class="create-subtab" data-create-screen="play">Create Play</button>
+      <button class="create-subtab" data-create-screen="defense">Create Defense</button>
+    </nav>
+
+    <section id="playbookLibrary" class="playbook-library" aria-label="Saved playbook"></section>
+
+    <section class="workspace">
+      <aside class="panel play-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="step-number">01</span>
+            <div>
+              <p id="leftPanelEyebrow" class="eyebrow">Formation</p>
+              <h2 id="leftPanelTitle">Create formation</h2>
+            </div>
+          </div>
+        </div>
+
+        <div class="formation-screen-only">
+          <label class="field-label" for="formationSelect">Formation</label>
+          <select id="formationSelect"></select>
+          <label class="field-label" for="formationName">Formation name</label>
+          <input id="formationName" type="text" maxlength="40" placeholder="Trips Right">
+          <div class="button-row">
+            <button id="newFormationButton" class="route-tool-button">New Formation</button>
+            <button id="saveFormationButton" class="route-tool-button">Save Formation</button>
+          </div>
+          <button id="mirrorFormationButton" class="route-tool-button mirror-action">Mirror Formation</button>
+        </div>
+
+        <div class="play-screen-only">
+          <p id="playEditorStatus" class="editor-status">New play</p>
+          <label class="field-label" for="playName">Play name</label>
+          <input id="playName" type="text" maxlength="40">
+          <label class="field-label" for="playFormationSelect">Formation</label>
+          <select id="playFormationSelect"></select>
+          <div class="button-row">
+            <button id="newPlayButton" class="route-tool-button">New Play</button>
+            <button id="savePlayButton" class="route-tool-button save-play-button">Save Play</button>
+          </div>
+          <div class="mirror-controls">
+            <label class="field-label" for="mirrorPlayFormationSelect">Mirror play to</label>
+            <select id="mirrorPlayFormationSelect"></select>
+            <button id="mirrorPlayButton" class="route-tool-button">Mirror To Formation</button>
+          </div>
+        </div>
+
+        <div class="assignment-heading offense-editor-only">
+          <span>Label</span>
+          <span id="assignmentActionHeading">Move</span>
+        </div>
+        <div id="assignments" class="assignments offense-editor-only"></div>
+
+        <div id="routeOptionsEditor" class="route-options-editor play-screen-only">
+          <div class="route-option-heading">
+            <div>
+              <p class="eyebrow">Route options</p>
+              <strong id="routeOptionPlayer">X options</strong>
+            </div>
+            <button id="addRouteOptionButton" class="route-tool-button">+ Add Option</button>
+          </div>
+          <label class="field-label" for="routeOptionSelect">Route branch</label>
+          <select id="routeOptionSelect"></select>
+          <div id="routeOptionDetails" class="route-option-details">
+            <label class="field-label" for="routeOptionName">Option name</label>
+            <input id="routeOptionName" type="text" maxlength="40" placeholder="Alert corner">
+            <label class="field-label" for="routeOptionDefense">Run versus defenses</label>
+            <div id="routeOptionDefense" class="route-defense-multi" role="group" aria-label="Defenses that trigger this route option"></div>
+            <p class="multi-select-help">Check every defense that should trigger this branch.</p>
+            <button id="deleteRouteOptionButton" class="route-tool-button danger">Delete Option</button>
+          </div>
+          <p class="route-option-help">Select an option, click its branch point anywhere on the solid base route, then draw the dotted branch. Matching defenses take that branch automatically.</p>
+        </div>
+      </aside>
+
+      <section class="field-section">
+        <div class="section-toolbar">
+          <div>
+            <span class="step-number">02</span>
+            <div>
+              <p class="eyebrow">The board</p>
+              <h2 id="boardTitle">Base Formation</h2>
+            </div>
+          </div>
+          <div class="legend">
+            <span><i class="dot offense"></i> Offense</span>
+            <span><i class="dot defense"></i> Defense</span>
+            <span><i class="line-swatch"></i> Route</span>
+            <span><i class="line-swatch option"></i> Option</span>
+            <span><i class="line-swatch motion"></i> Motion</span>
+          </div>
+        </div>
+
+        <div class="route-toolbar">
+          <div class="board-mode-switch" aria-label="Board tool">
+            <button class="board-mode-button active" data-board-mode="draw">Draw</button>
+            <button class="board-mode-button" data-board-mode="move">Move</button>
+          </div>
+          <div class="play-path-switch play-screen-only" aria-label="Play path type">
+            <button id="drawRouteButton" class="path-type-button active">Route</button>
+            <button id="drawMotionButton" class="path-type-button">Pre-Snap Motion</button>
+          </div>
+          <label class="field-standard-control">
+            Field
+            <select id="fieldStandardSelect">
+              <option value="highSchool">High School</option>
+              <option value="college">College</option>
+              <option value="nfl">NFL</option>
+            </select>
+          </label>
+          <div>
+            <span class="route-status-dot"></span>
+            <span id="boardModeStatus">Drawing</span> <strong id="activeRouteLabel">X</strong>
+          </div>
+          <span id="routeHelp" class="route-help">Click the field to add straight segments. Hover over a break point to round it.</span>
+          <button id="previewMovementButton" class="button button-primary preview-movement-button">Preview</button>
+          <button id="addNoteButton" class="route-tool-button">+ Note</button>
+          <button id="undoPointButton" class="route-tool-button">Undo Point</button>
+          <button id="clearRouteButton" class="route-tool-button danger">Clear Route</button>
+        </div>
+
+        <div id="runToolbar" class="run-toolbar hidden">
+          <div>
+            <label class="field-label" for="runPlaySelect">Play</label>
+            <select id="runPlaySelect"></select>
+          </div>
+          <div>
+            <label class="field-label" for="runFormationSelect">Formation</label>
+            <select id="runFormationSelect"></select>
+          </div>
+          <div>
+            <label class="field-label" for="runDefenseSelect">Defense</label>
+            <select id="runDefenseSelect"></select>
+          </div>
+          <div>
+            <label class="field-label" for="runSpeedSelect">Speed</label>
+            <select id="runSpeedSelect">
+              <option value="1">100%</option>
+              <option value=".75">75%</option>
+              <option value=".5">50%</option>
+              <option value=".25">25%</option>
+              <option value=".1">10%</option>
+            </select>
+          </div>
+          <div>
+            <label class="field-label" for="runDefenseMovementSelect">Defensive movement</label>
+            <select id="runDefenseMovementSelect">
+              <option value="on">On</option>
+              <option value="off">Off</option>
+            </select>
+          </div>
+          <button id="runPlayButton" class="button button-primary">Play</button>
+          <button id="resetPlayButton" class="button button-dark">Reset</button>
+          <div class="scenario-controls">
+            <button id="editScenarioButton" class="route-tool-button">Edit Scenario</button>
+            <button id="scenarioMoveButton" class="route-tool-button scenario-edit-only">Move</button>
+            <button id="scenarioDrawButton" class="route-tool-button scenario-edit-only">Draw</button>
+            <button id="scenarioManButton" class="route-tool-button scenario-edit-only">Man Assignment</button>
+            <button id="scenarioUndoButton" class="route-tool-button scenario-edit-only">Undo</button>
+            <button id="scenarioClearButton" class="route-tool-button scenario-edit-only">Clear Movement</button>
+            <button id="scenarioResetButton" class="route-tool-button danger scenario-edit-only">Reset Scenario</button>
+            <span id="scenarioStatus" class="scenario-status scenario-edit-only"></span>
+          </div>
+        </div>
+
+        <div class="field-card">
+          <svg id="field" viewBox="0 0 900 620" role="img" aria-label="Eleven-on-eleven football play diagram">
+            <defs>
+              <pattern id="grass" width="22" height="22" patternUnits="userSpaceOnUse">
+                <rect width="22" height="22" fill="#174c35"></rect>
+                <rect width="11" height="22" fill="#194f38"></rect>
+              </pattern>
+              <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L0,6 L7,3 z" fill="#f2c35a"></path>
+              </marker>
+              <marker id="defenseArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L0,6 L7,3 z" fill="#ed7048"></path>
+              </marker>
+              <marker id="motionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L0,6 L7,3 z" fill="#76d7ff"></path>
+              </marker>
+              <marker id="optionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse">
+                <path d="M0,0 L0,6 L7,3 z" fill="#c9f45c"></path>
+              </marker>
+              <filter id="shadow">
+                <feDropShadow dx="0" dy="3" stdDeviation="3" flood-opacity=".3"></feDropShadow>
+              </filter>
+            </defs>
+            <rect width="900" height="620" rx="10" fill="url(#grass)"></rect>
+            <g id="fieldMarkings"></g>
+            <g id="zones"></g>
+            <g id="routes"></g>
+            <g id="defenders"></g>
+            <g id="players"></g>
+            <g id="notes"></g>
+          </svg>
+        </div>
+        <p id="fieldNote" class="field-note">Move players into position, name the formation, and save it.</p>
+      </section>
+
+      <aside class="panel defense-panel">
+        <div class="panel-heading">
+          <div>
+            <span class="step-number">03</span>
+            <div>
+              <p class="eyebrow">Defense</p>
+              <h2>Create defense</h2>
+            </div>
+          </div>
+        </div>
+
+        <div class="subsection defense-library">
+          <p class="eyebrow">Defense library</p>
+          <label class="field-label" for="defenseSelect">Saved defense</label>
+          <select id="defenseSelect"></select>
+          <label class="field-label" for="defenseName">Defense name</label>
+          <input id="defenseName" type="text" maxlength="40" placeholder="Red Pressure">
+          <div class="button-row">
+            <button id="newDefenseButton" class="route-tool-button">New Defense</button>
+            <button id="saveDefenseButton" class="route-tool-button">Save Defense</button>
+          </div>
+        </div>
+
+        <div class="defense-path-card">
+          <p class="eyebrow">Defensive assignment</p>
+          <div class="defense-assignment-tools">
+            <button id="defensePathModeButton" class="route-tool-button active">Custom Path</button>
+            <button id="defenseZoneModeButton" class="route-tool-button">Zone Assignment</button>
+            <button id="defenseManModeButton" class="route-tool-button">Man Assignment</button>
+            <button id="defenseNoMovementButton" class="route-tool-button">No Movement</button>
+          </div>
+          <p id="defensePathHelp">Select a defender, then draw movement or assign the offensive player they guard.</p>
+        </div>
+
+        <div class="defense-label-editor">
+          <p class="eyebrow">Player labels</p>
+          <div class="defense-label-heading">
+            <span>Player</span>
+            <span>Label</span>
+          </div>
+          <div id="defenseLabels"></div>
+        </div>
+
+      </aside>
+    </section>
+
+    <section class="learning-strip">
+      <div>
+        <p class="eyebrow">Coach's cue</p>
+        <h2 id="coachCue">Confirm the middle-field safety after the snap.</h2>
+      </div>
+      <div class="cue-details">
+        <div><span>1</span><p><strong>Identify</strong><br>Shell and leverage</p></div>
+        <div><span>2</span><p><strong>Confirm</strong><br>Post-snap rotation</p></div>
+        <div><span>3</span><p><strong>Deliver</strong><br>On time, to grass</p></div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <span>READROUTE FOOTBALL LAB</span>
+    <span>Built for smarter reps.</span>
+  </footer>
+
+  <div id="saveToast" class="save-toast" role="status" aria-live="polite">Saved successfully</div>
+
+  <script src="app.js"></script>
+</body>
+</html>
