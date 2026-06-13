@@ -21,6 +21,11 @@
       <button class="mode-tab" data-app-tab="run">Run Plays</button>
       <button class="mode-tab" data-app-tab="playbook">Playbook</button>
     </nav>
+    <div class="cloud-sync">
+      <span id="cloudSyncStatus">Saved on this computer</span>
+      <button id="cloudSignInButton" type="button">Connect Workspace</button>
+      <button id="cloudSignOutButton" type="button" class="hidden">Sign Out</button>
+    </div>
   </header>
 
   <main>
@@ -313,6 +318,8 @@
 
   <div id="saveToast" class="save-toast" role="status" aria-live="polite">Saved successfully</div>
 
+  <script src="firebase-config.js"></script>
   <script src="app.js"></script>
+  <script type="module" src="cloud-sync.js"></script>
 </body>
 </html>

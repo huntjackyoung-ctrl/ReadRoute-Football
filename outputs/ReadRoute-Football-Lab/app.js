@@ -66,7 +66,7 @@ function defaultDefensePositions() {
 }
 
 function createNote(text = "", x = 350, y = 250) {
-  return { id: crypto.randomUUID(), text, x, y, width: 170, height: 62 };
+  return { id: crypto.randomUUID(), text, x, y, width: 110, height: 44 };
 }
 
 function createBlankPlay(name = "Untitled Play") {
@@ -355,12 +355,22 @@ function loadLibraryFolders() {
     : [];
 }
 
+function normalizeLibraryAssignments(assignments) {
+  if (!assignments || typeof assignments !== "object") return {};
+  return Object.fromEntries(
+    Object.entries(assignments).map(([key, value]) => [
+      key,
+      [...new Set((Array.isArray(value) ? value : [value]).filter(Boolean))]
+    ])
+  );
+}
+
 function loadLibraryAssignments() {
   const saved = readJsonStorage(storageKeys.folderAssignments);
   const recovered = saved && typeof saved === "object"
     ? saved
     : recoverySnapshot()?.libraryAssignments;
-  return recovered && typeof recovered === "object" ? recovered : {};
+  return normalizeLibraryAssignments(recovered);
 }
 
 function playbookSnapshot() {
@@ -462,6 +472,9 @@ function persistPlaybook({ rotateBackup = true } = {}) {
     lastSavedSignature = signature;
     if (els.playCount) els.playCount.textContent = plays.length;
     persistIndexedDbSnapshot(snapshot);
+    window.dispatchEvent(new CustomEvent("readroute:playbook-saved", {
+      detail: structuredClone(snapshot)
+    }));
     return true;
   } catch (error) {
     console.error("ReadRoute autosave failed", error);
@@ -1003,22 +1016,20 @@ function libraryItems() {
   ];
 }
 
-function folderOptionMarkup(selectedId = "") {
-  const options = [`<option value="">Unfiled</option>`];
-  function appendOptions(parentId = null, depth = 0) {
-    libraryFolders
-      .filter(folder => folder.parentId === parentId)
-      .sort((a, b) => a.name.localeCompare(b.name))
-      .forEach(folder => {
-        options.push(`<option value="${folder.id}" ${selectedId === folder.id ? "selected" : ""}>${"&nbsp;&nbsp;".repeat(depth)}${escapeHtml(folder.name)}</option>`);
-        appendOptions(folder.id, depth + 1);
-      });
-  }
-  appendOptions();
-  return options.join("");
+function itemFolderIds(key) {
+  const saved = libraryAssignments[key];
+  return Array.isArray(saved) ? saved : saved ? [saved] : [];
 }
 
-function customLibraryFileMarkup(item) {
+function setItemFolderMembership(key, folderId, included) {
+  const memberships = new Set(itemFolderIds(key));
+  if (included) memberships.add(folderId);
+  else memberships.delete(folderId);
+  if (memberships.size) libraryAssignments[key] = [...memberships];
+  else delete libraryAssignments[key];
+}
+
+function customLibraryFileMarkup(item, folderId) {
   const key = libraryItemKey(item.type, item.id);
   const previewAttribute = item.type === "play"
     ? `data-library-play="${item.id}"`
@@ -1033,9 +1044,7 @@ function customLibraryFileMarkup(item) {
         <span>${escapeHtml(item.name)}</span>
       </button>
       ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
-      <select class="library-move-select" data-library-item="${key}" aria-label="Move ${escapeHtml(item.name)} to folder">
-        ${folderOptionMarkup(libraryAssignments[key] || "")}
-      </select>
+      <button class="library-action-button danger" data-remove-folder-item="${key}" data-remove-from-folder="${folderId}">Remove</button>
     </div>
   `;
 }
@@ -1045,7 +1054,7 @@ function customFolderMarkup(folder, depth = 0) {
     .filter(candidate => candidate.parentId === folder.id)
     .sort((a, b) => a.name.localeCompare(b.name));
   const items = libraryItems()
-    .filter(item => libraryAssignments[libraryItemKey(item.type, item.id)] === folder.id)
+    .filter(item => itemFolderIds(libraryItemKey(item.type, item.id)).includes(folder.id))
     .sort((a, b) => a.name.localeCompare(b.name));
   return `
     <details class="custom-library-folder" open style="--folder-depth:${depth}" data-folder-drop="${folder.id}">
@@ -1061,8 +1070,22 @@ function customFolderMarkup(folder, depth = 0) {
       </div>
       <div class="custom-folder-content">
         ${children.map(child => customFolderMarkup(child, depth + 1)).join("")}
-        ${items.map(customLibraryFileMarkup).join("")}
+        ${items.map(item => customLibraryFileMarkup(item, folder.id)).join("")}
         ${!children.length && !items.length ? `<p class="library-empty">This folder is empty.</p>` : ""}
+        <details class="folder-membership-editor">
+          <summary>Add or remove files</summary>
+          <div class="folder-membership-list">
+            ${libraryItems().sort((a, b) => a.name.localeCompare(b.name)).map(item => {
+              const key = libraryItemKey(item.type, item.id);
+              return `
+                <label>
+                  <input type="checkbox" data-folder-membership="${folder.id}" data-membership-item="${key}" ${itemFolderIds(key).includes(folder.id) ? "checked" : ""}>
+                  <span>${item.icon} - ${escapeHtml(item.name)}</span>
+                </label>
+              `;
+            }).join("")}
+          </div>
+        </details>
       </div>
     </details>
   `;
@@ -1072,31 +1095,18 @@ function customFolderBrowserMarkup() {
   const roots = libraryFolders
     .filter(folder => !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId))
     .sort((a, b) => a.name.localeCompare(b.name));
-  const unfiled = libraryItems()
-    .filter(item => !libraryAssignments[libraryItemKey(item.type, item.id)]
-      || !libraryFolders.some(folder => folder.id === libraryAssignments[libraryItemKey(item.type, item.id)]))
-    .sort((a, b) => a.name.localeCompare(b.name));
   return `
     <section class="custom-folder-browser">
       <div class="custom-folder-heading">
         <div>
           <p class="eyebrow">Custom organization</p>
           <h3>Folders</h3>
-          <p class="custom-folder-help">Drag a file onto a folder, or use its folder menu.</p>
+          <p class="custom-folder-help">A play can belong to several folders. Drag it onto a folder or use Add or remove files.</p>
         </div>
         <button id="addRootFolderButton" class="library-action-button">+ New Folder</button>
       </div>
       ${roots.map(folder => customFolderMarkup(folder)).join("")}
-      <details class="custom-library-folder unfiled-folder" open data-folder-drop="">
-        <summary>
-          <span class="library-folder-icon">U</span>
-          <span>Unfiled</span>
-          <small>${unfiled.length}</small>
-        </summary>
-        <div class="custom-folder-content">
-          ${unfiled.length ? unfiled.map(customLibraryFileMarkup).join("") : `<p class="library-empty">Everything is filed.</p>`}
-        </div>
-      </details>
+      ${!roots.length ? `<p class="library-empty">Create a folder such as Week 1 or Cover 2 Beaters.</p>` : ""}
     </section>
   `;
 }
@@ -1245,17 +1255,30 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-delete-folder]").forEach(button => {
     button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
   });
-  els.playbookLibrary.querySelectorAll("[data-library-item]").forEach(select => {
-    select.addEventListener("change", () => {
-      if (select.value) {
-        libraryAssignments[select.dataset.libraryItem] = select.value;
-      } else {
-        delete libraryAssignments[select.dataset.libraryItem];
-      }
+  els.playbookLibrary.querySelectorAll("[data-folder-membership]").forEach(input => {
+    input.addEventListener("change", () => {
+      setItemFolderMembership(
+        input.dataset.membershipItem,
+        input.dataset.folderMembership,
+        input.checked
+      );
       lastSavedSignature = "";
       persistPlaybook();
       renderPlaybookLibrary();
-      showSaveSuccess("Moved successfully");
+      showSaveSuccess("Folder membership updated");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-remove-folder-item]").forEach(button => {
+    button.addEventListener("click", () => {
+      setItemFolderMembership(
+        button.dataset.removeFolderItem,
+        button.dataset.removeFromFolder,
+        false
+      );
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlaybookLibrary();
+      showSaveSuccess("Removed from folder");
     });
   });
   els.playbookLibrary.querySelectorAll("[data-drag-library-item]").forEach(row => {
@@ -1281,16 +1304,12 @@ function renderPlaybookLibrary() {
       event.stopPropagation();
       const key = event.dataTransfer.getData("text/plain");
       const folderId = folder.dataset.folderDrop;
-      if (!key) return;
-      if (folderId) {
-        libraryAssignments[key] = folderId;
-      } else {
-        delete libraryAssignments[key];
-      }
+      if (!key || !folderId) return;
+      setItemFolderMembership(key, folderId, true);
       lastSavedSignature = "";
       persistPlaybook();
       renderPlaybookLibrary();
-      showSaveSuccess("Moved successfully");
+      showSaveSuccess("Added to folder");
     });
   });
 
@@ -1347,13 +1366,14 @@ function deleteLibraryFolder(folderId) {
   libraryFolders.forEach(candidate => {
     if (candidate.parentId === folderId) candidate.parentId = destinationId;
   });
-  Object.entries(libraryAssignments).forEach(([key, assignedFolderId]) => {
-    if (assignedFolderId !== folderId) return;
-    if (destinationId) {
-      libraryAssignments[key] = destinationId;
-    } else {
-      delete libraryAssignments[key];
-    }
+  Object.keys(libraryAssignments).forEach(key => {
+    const currentMemberships = itemFolderIds(key);
+    if (!currentMemberships.includes(folderId)) return;
+    const memberships = currentMemberships.filter(id => id !== folderId);
+    if (destinationId) memberships.push(destinationId);
+    const uniqueMemberships = [...new Set(memberships)];
+    if (uniqueMemberships.length) libraryAssignments[key] = uniqueMemberships;
+    else delete libraryAssignments[key];
   });
   libraryFolders = libraryFolders.filter(candidate => candidate.id !== folderId);
   lastSavedSignature = "";
@@ -1401,9 +1421,7 @@ function restorePreviousBackup() {
   plays = backup.plays.map(normalizePlay);
   defenses = backup.defenses;
   libraryFolders = Array.isArray(backup.libraryFolders) ? backup.libraryFolders : [];
-  libraryAssignments = backup.libraryAssignments && typeof backup.libraryAssignments === "object"
-    ? backup.libraryAssignments
-    : {};
+  libraryAssignments = normalizeLibraryAssignments(backup.libraryAssignments);
   draftPlay = null;
   selectedPlayId = plays[0].id;
   selectedFormationId = draftPlay?.formationId || plays[0].formationId || formations[0].id;
@@ -1450,9 +1468,7 @@ async function importPlaybook(event) {
           parentId: folder.parentId || null
         }))
       : [];
-    libraryAssignments = data.libraryAssignments && typeof data.libraryAssignments === "object"
-      ? data.libraryAssignments
-      : {};
+    libraryAssignments = normalizeLibraryAssignments(data.libraryAssignments);
     draftPlay = data.draftPlay ? normalizePlay(data.draftPlay) : null;
     selectedPlayId = plays[0].id;
     selectedFormationId = plays[0].formationId || formations[0].id;
@@ -2680,12 +2696,12 @@ function renderNotes() {
 function noteDimensions(text) {
   const content = text || "";
   const lines = content.split("\n");
-  const longestLine = Math.max(12, ...lines.map(line => line.length));
-  const width = Math.max(170, Math.min(360, 80 + (longestLine * 7)));
-  const charactersPerLine = Math.max(15, Math.floor((width - 30) / 7));
+  const longestLine = Math.max(1, ...lines.map(line => line.length));
+  const width = Math.max(110, Math.min(360, 45 + (longestLine * 7)));
+  const charactersPerLine = Math.max(9, Math.floor((width - 24) / 7));
   const wrappedLines = lines.reduce((total, line) =>
     total + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0);
-  const height = Math.max(62, 45 + (wrappedLines * 17));
+  const height = Math.max(44, 27 + (wrappedLines * 17));
   return { width, height };
 }
 
@@ -4122,10 +4138,7 @@ async function initializeApp() {
       libraryFolders = Array.isArray(indexedBackup.libraryFolders)
         ? indexedBackup.libraryFolders
         : [];
-      libraryAssignments = indexedBackup.libraryAssignments
-        && typeof indexedBackup.libraryAssignments === "object"
-        ? indexedBackup.libraryAssignments
-        : {};
+      libraryAssignments = normalizeLibraryAssignments(indexedBackup.libraryAssignments);
       draftPlay = indexedBackup.draftPlay
         ? normalizePlay(indexedBackup.draftPlay)
         : null;
@@ -4149,5 +4162,67 @@ async function initializeApp() {
   lastSavedSignature = "";
   persistPlaybook({ rotateBackup: false });
 }
+
+function applySharedPlaybook(snapshot) {
+  if (!Array.isArray(snapshot?.formations) || !snapshot.formations.length
+    || !Array.isArray(snapshot?.plays) || !snapshot.plays.length
+    || !Array.isArray(snapshot?.defenses) || !snapshot.defenses.length) {
+    return false;
+  }
+  try {
+    localStorage.setItem(
+      storageKeys.previousSnapshot,
+      JSON.stringify(playbookSnapshot())
+    );
+  } catch (error) {
+    console.warn("Could not preserve the pre-cloud recovery snapshot", error);
+  }
+  formations = snapshot.formations.map(formation => ({
+    ...formation,
+    labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
+    offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
+    notes: Array.isArray(formation.notes) ? formation.notes : []
+  }));
+  plays = snapshot.plays.map(normalizePlay);
+  defenses = snapshot.defenses.map(defense => ({
+    ...defense,
+    positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
+    routes: defense.routes || {},
+    manAssignments: defense.manAssignments || {},
+    zoneAssignments: defense.zoneAssignments || {},
+    labels: defense.labels || {},
+    notes: Array.isArray(defense.notes) ? defense.notes : []
+  }));
+  libraryFolders = Array.isArray(snapshot.libraryFolders)
+    ? snapshot.libraryFolders
+    : [];
+  libraryAssignments = normalizeLibraryAssignments(snapshot.libraryAssignments);
+  draftPlay = snapshot.draftPlay ? normalizePlay(snapshot.draftPlay) : null;
+  selectedPlayId = plays.some(play => play.id === selectedPlayId)
+    ? selectedPlayId
+    : plays[0].id;
+  selectedFormationId = formations.some(formation => formation.id === selectedFormationId)
+    ? selectedFormationId
+    : (currentPlay().formationId || formations[0].id);
+  selectedDefenseId = defenses.some(defense => defense.id === selectedDefenseId)
+    ? selectedDefenseId
+    : defenses[0].id;
+  if (fieldStandards[snapshot.fieldStandard]) {
+    fieldStandard = snapshot.fieldStandard;
+    localStorage.setItem("readroute-field-standard", fieldStandard);
+  }
+  lastSavedSignature = "";
+  persistPlaybook({ rotateBackup: false });
+  renderMarkings();
+  renderPlayControls();
+  render();
+  return true;
+}
+
+window.ReadRouteCloud = {
+  getSnapshot: () => playbookSnapshot(),
+  getSavedAt: () => localStorage.getItem(storageKeys.savedAt) || "",
+  applySnapshot: applySharedPlaybook
+};
 
 initializeApp();

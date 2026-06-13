@@ -4,7 +4,9 @@ An interactive football learning prototype for visualizing offensive concepts ag
 
 ## Run it
 
-Open `index.html` in a modern browser. No installation or server is required.
+Open `index.html` in a modern browser. No installation or server is required for local use.
+
+To use one playbook across multiple computers, complete the one-time setup in `FIREBASE_SETUP.md`, then use **Connect Workspace** with the same Google account on each computer.
 
 ## Included
 
@@ -59,7 +61,8 @@ Open `index.html` in a modern browser. No installation or server is required.
 - Play/Reset animation for offense and defense
 - Equal movement speed across every offensive and defensive path
 - Dedicated Playbook tab with formation, play, and defense folders
-- Custom Playbook folders with nested subfolders, drag-and-drop filing, and move menus
+- Custom Playbook folders with nested subfolders and many-to-many membership, so one play can appear in several folders
+- Optional Google-account cloud workspace sync across computers
 - Full playbook export/import for moving saved work between browsers and computers
 - Immediate autosaving after every edit
 - Rotating recovery snapshots plus a secondary browser database backup
