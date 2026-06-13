@@ -1,12 +1,15 @@
-# One-Time Cloud Workspace Setup
+# Firebase Workspace Setup
 
-ReadRoute needs a cloud database to show the same playbook on multiple computers. GitHub Pages alone cannot store private user data.
+ReadRoute uses Firebase Authentication and Realtime Database so separate Google accounts can share one playbook.
 
-1. Create a Firebase project at https://console.firebase.google.com/.
-2. Add a Web app inside the project.
-3. Enable **Authentication > Sign-in method > Google**.
-4. Create a **Realtime Database**.
-5. Set these database rules:
+## Firebase Products
+
+1. Enable **Authentication > Sign-in method > Google**.
+2. Add `read-route-football.vercel.app` and `thegridiq.com` under **Authentication > Settings > Authorized domains**.
+3. Create a **Realtime Database**.
+4. Paste the rules below into **Realtime Database > Rules**, then click **Publish**.
+
+## Required Database Rules
 
 ```json
 {
@@ -16,26 +19,42 @@ ReadRoute needs a cloud database to show the same playbook on multiple computers
         ".read": "auth != null && auth.uid === $uid",
         ".write": "auth != null && auth.uid === $uid"
       }
+    },
+    "workspaces": {
+      "$workspaceId": {
+        ".write": "auth != null && !data.exists() && newData.child('meta').child('ownerUid').val() === auth.uid && newData.child('members').child(auth.uid).child('role').val() === 'owner'",
+        "meta": {
+          ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+          ".write": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner'"
+        },
+        "playbook": {
+          ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+          ".write": "auth != null && (root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner' || root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'editor')"
+        },
+        "members": {
+          ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()",
+          "$uid": {
+            ".write": "auth != null && (root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner' || (auth.uid === $uid && !data.exists() && newData.child('inviteCode').isString() && root.child('workspaces').child($workspaceId).child('invites').child(newData.child('inviteCode').val()).child('active').val() === true && newData.child('role').val() === root.child('workspaces').child($workspaceId).child('invites').child(newData.child('inviteCode').val()).child('role').val()))"
+          }
+        },
+        "invites": {
+          "$code": {
+            ".read": "auth != null",
+            ".write": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner'"
+          }
+        }
+      }
     }
   }
 }
 ```
 
-6. In Authentication settings, add your GitHub Pages domain to **Authorized domains**.
-7. Copy the Firebase web configuration into `firebase-config.js`:
+## Collaboration Flow
 
-```js
-window.READROUTE_FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT-default-rtdb.firebaseio.com",
-  projectId: "YOUR_PROJECT",
-  storageBucket: "YOUR_PROJECT.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
-};
-```
+1. The owner opens the deployed site and clicks **Connect Workspace**.
+2. The first connection migrates the owner’s existing cloud or browser playbook into an owner workspace.
+3. The owner clicks **Share**, chooses **Editor** or **Viewer**, and creates an invite link.
+4. The teammate opens that link and signs in with their own Google account.
+5. Editors can change the shared playbook. Viewers can study and run plays but cannot save changes.
 
-After this file is pushed, click **Connect Workspace** and use the same Google account on every computer.
-
-On the first connection, if the cloud workspace is empty, ReadRoute uploads the complete playbook already saved in that browser. It does not replace the browser's existing playbook with a blank workspace.
+Existing browser data is preserved as a recovery snapshot before cloud data is loaded.

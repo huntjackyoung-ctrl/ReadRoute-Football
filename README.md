@@ -52,7 +52,7 @@ To use one playbook across multiple computers, complete the one-time setup in `F
 - Reusable named defenses with saved alignments and movement
 - Editable labels for all 11 defensive players
 - Blank 11-player defensive canvas with no coverage templates
-- Draggable field notes with a dedicated top-bar drag control plus isolated text editing and deletion
+- Draggable field notes that begin at a one-character size and grow with their content
 - Auto-growing note boxes with compact top-right delete controls
 - New formations and defenses inherit player labels from the first saved setup
 - Smaller route and defensive movement arrowheads
@@ -63,6 +63,7 @@ To use one playbook across multiple computers, complete the one-time setup in `F
 - Dedicated Playbook tab with formation, play, and defense folders
 - Custom Playbook folders with nested subfolders and many-to-many membership, so one play can appear in several folders
 - Optional Google-account cloud workspace sync across computers
+- Shared workspace invite links with owner, editor, and viewer roles
 - Full playbook export/import for moving saved work between browsers and computers
 - Immediate autosaving after every edit
 - Rotating recovery snapshots plus a secondary browser database backup

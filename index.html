@@ -24,6 +24,7 @@
     <div class="cloud-sync">
       <span id="cloudSyncStatus">Saved on this computer</span>
       <button id="cloudSignInButton" type="button">Connect Workspace</button>
+      <button id="workspaceShareButton" type="button" class="hidden">Share</button>
       <button id="cloudSignOutButton" type="button" class="hidden">Sign Out</button>
     </div>
   </header>
@@ -317,6 +318,27 @@
   </footer>
 
   <div id="saveToast" class="save-toast" role="status" aria-live="polite">Saved successfully</div>
+  <dialog id="workspaceShareDialog" class="workspace-share-dialog">
+    <form method="dialog">
+      <button class="workspace-dialog-close" aria-label="Close">×</button>
+      <p class="eyebrow">Shared workspace</p>
+      <h2>Invite your staff</h2>
+      <p>Create a link for editors who can change the playbook or viewers who can only study it.</p>
+      <label>
+        Access
+        <select id="workspaceInviteRole">
+          <option value="editor">Editor</option>
+          <option value="viewer">Viewer</option>
+        </select>
+      </label>
+      <button id="createWorkspaceInviteButton" type="button" class="button button-primary">Create Invite Link</button>
+      <div id="workspaceInviteResult" class="workspace-invite-result hidden">
+        <input id="workspaceInviteLink" type="text" readonly>
+        <button id="copyWorkspaceInviteButton" type="button" class="library-action-button">Copy Link</button>
+      </div>
+      <div id="workspaceMemberList" class="workspace-member-list"></div>
+    </form>
+  </dialog>
 
   <script src="firebase-config.js"></script>
   <script src="app.js"></script>

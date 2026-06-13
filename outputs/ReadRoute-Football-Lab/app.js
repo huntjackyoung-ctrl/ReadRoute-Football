@@ -66,7 +66,7 @@ function defaultDefensePositions() {
 }
 
 function createNote(text = "", x = 350, y = 250) {
-  return { id: crypto.randomUUID(), text, x, y, width: 110, height: 44 };
+  return { id: crypto.randomUUID(), text, x, y, width: 38, height: 44 };
 }
 
 function createBlankPlay(name = "Untitled Play") {
@@ -127,6 +127,7 @@ let libraryPreview = { type: "play", id: selectedPlayId };
 let saveToastTimer = null;
 let autosaveTimer = null;
 let lastSavedSignature = "";
+let cloudAccessRole = "owner";
 let fieldStandard = localStorage.getItem("readroute-field-standard") || "highSchool";
 if (!fieldStandards[fieldStandard]) fieldStandard = "highSchool";
 
@@ -472,9 +473,11 @@ function persistPlaybook({ rotateBackup = true } = {}) {
     lastSavedSignature = signature;
     if (els.playCount) els.playCount.textContent = plays.length;
     persistIndexedDbSnapshot(snapshot);
-    window.dispatchEvent(new CustomEvent("readroute:playbook-saved", {
-      detail: structuredClone(snapshot)
-    }));
+    if (cloudAccessRole !== "viewer") {
+      window.dispatchEvent(new CustomEvent("readroute:playbook-saved", {
+        detail: structuredClone(snapshot)
+      }));
+    }
     return true;
   } catch (error) {
     console.error("ReadRoute autosave failed", error);
@@ -1038,7 +1041,7 @@ function customLibraryFileMarkup(item, folderId) {
       : "";
   const editAttribute = `data-edit-${item.type}="${item.id}"`;
   return `
-    <div class="custom-library-file" draggable="true" data-drag-library-item="${key}">
+    <div class="custom-library-file" draggable="${cloudAccessRole !== "viewer"}" data-drag-library-item="${key}">
       <button class="library-file ${item.type === "defense" ? "defense-file" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
         <span class="library-file-icon">${item.icon}</span>
         <span>${escapeHtml(item.name)}</span>
@@ -2609,9 +2612,9 @@ function renderNotes() {
       group.append(dragHandle);
 
       const foreignObject = svgEl("foreignObject", {
-        x: 7,
+        x: 0,
         y: 0,
-        width: width - 14,
+        width,
         height
       });
       const editor = document.createElementNS("http://www.w3.org/1999/xhtml", "div");
@@ -2619,7 +2622,7 @@ function renderNotes() {
       const moveButton = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
       moveButton.type = "button";
       moveButton.className = "note-move-button";
-      moveButton.textContent = "Drag note";
+      moveButton.textContent = "↕";
       moveButton.title = "Drag note";
       moveButton.setAttribute("aria-label", "Drag note");
       moveButton.addEventListener("pointerdown", event => {
@@ -2656,7 +2659,7 @@ function renderNotes() {
         background.setAttribute("width", next.width);
         background.setAttribute("height", next.height);
         dragHandle.setAttribute("width", next.width);
-        foreignObject.setAttribute("width", next.width - 14);
+        foreignObject.setAttribute("width", next.width);
         foreignObject.setAttribute("height", next.height);
         saveAllLibraries();
       });
@@ -2697,8 +2700,8 @@ function noteDimensions(text) {
   const content = text || "";
   const lines = content.split("\n");
   const longestLine = Math.max(1, ...lines.map(line => line.length));
-  const width = Math.max(110, Math.min(360, 45 + (longestLine * 7)));
-  const charactersPerLine = Math.max(9, Math.floor((width - 24) / 7));
+  const width = Math.max(38, Math.min(360, 25 + (longestLine * 7)));
+  const charactersPerLine = Math.max(1, Math.floor((width - 20) / 7));
   const wrappedLines = lines.reduce((total, line) =>
     total + Math.max(1, Math.ceil(line.length / charactersPerLine)), 0);
   const height = Math.max(44, 27 + (wrappedLines * 17));
@@ -4222,7 +4225,16 @@ function applySharedPlaybook(snapshot) {
 window.ReadRouteCloud = {
   getSnapshot: () => playbookSnapshot(),
   getSavedAt: () => localStorage.getItem(storageKeys.savedAt) || "",
-  applySnapshot: applySharedPlaybook
+  applySnapshot: applySharedPlaybook,
+  setAccessRole: role => {
+    cloudAccessRole = ["owner", "editor", "viewer"].includes(role) ? role : "viewer";
+    document.body.classList.toggle("workspace-viewer", cloudAccessRole === "viewer");
+    if (cloudAccessRole === "viewer" && appTab === "create") {
+      appTab = "playbook";
+      syncTabButtons();
+      render();
+    }
+  }
 };
 
 initializeApp();
