@@ -15,6 +15,7 @@ const offensiveLine = [
 ];
 
 const quarterback = { id: "QB", label: "QB", x: 450, y: 540 };
+const defensePositionLabels = ["DE", "DT", "DT", "DE", "OLB", "MLB", "OLB", "CB", "FS", "SS", "CB"];
 const lineOfScrimmage = 476;
 const scrimmageSnapDistance = 16;
 const storageKeys = {
@@ -124,10 +125,12 @@ let runScenario = null;
 let scenarioEditing = false;
 let scenarioTool = "move";
 let testSourceId = "all";
+let testPlayIds = new Set(plays.map(play => play.id));
 let testDefenseIds = new Set(defenses.map(defense => defense.id));
 let testAnswerRevealed = false;
 let testRoundReady = false;
-let lastTestCombination = "";
+let testSessionPlayIds = [];
+let testSessionIndex = -1;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 const libraryFolderOpenState = new Map();
@@ -155,6 +158,8 @@ const els = {
   runPlayBrowser: document.querySelector("#runPlayBrowser"),
   runPlayBrowserContent: document.querySelector("#runPlayBrowserContent"),
   testSourceSelect: document.querySelector("#testSourceSelect"),
+  testPlayOptions: document.querySelector("#testPlayOptions"),
+  testPlaySummary: document.querySelector("#testPlaySummary"),
   testSpeedSelect: document.querySelector("#testSpeedSelect"),
   testDefenseOptions: document.querySelector("#testDefenseOptions"),
   testDefenseSummary: document.querySelector("#testDefenseSummary"),
@@ -2180,17 +2185,70 @@ function nestedFolderIds(folderId) {
 }
 
 function testEligiblePlays() {
-  if (testSourceId === "all") return plays;
-  const folderIds = nestedFolderIds(testSourceId);
-  return plays.filter(play =>
-    itemFolderIds(libraryItemKey("play", play.id))
-      .some(folderId => folderIds.has(folderId))
-  );
+  const sourcePlays = testSourceId === "all"
+    ? plays
+    : (() => {
+        const folderIds = nestedFolderIds(testSourceId);
+        return plays.filter(play =>
+          itemFolderIds(libraryItemKey("play", play.id))
+            .some(folderId => folderIds.has(folderId))
+        );
+      })();
+  return sourcePlays.filter(play => testPlayIds.has(play.id));
+}
+
+function resetTestSession() {
+  testRoundReady = false;
+  testAnswerRevealed = false;
+  testSessionPlayIds = [];
+  testSessionIndex = -1;
+  stopAnimationPlayback();
+  const sessionButton = document.querySelector("#newTestRoundButton");
+  const runButton = document.querySelector("#runTestButton");
+  const resetButton = document.querySelector("#resetTestButton");
+  const revealButton = document.querySelector("#revealTestButton");
+  if (sessionButton) sessionButton.textContent = "Start Test";
+  if (runButton) runButton.disabled = true;
+  if (resetButton) resetButton.disabled = true;
+  if (revealButton) {
+    revealButton.disabled = true;
+    revealButton.textContent = "Reveal Answer";
+  }
+}
+
+function shuffledIds(items) {
+  const ids = items.map(item => item.id);
+  for (let index = ids.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    [ids[index], ids[swapIndex]] = [ids[swapIndex], ids[index]];
+  }
+  return ids;
+}
+
+function refreshTestPlaySelectionUi() {
+  if (!els.testPlayOptions) return;
+  els.testPlayOptions.querySelectorAll("[data-test-play]").forEach(input => {
+    input.checked = testPlayIds.has(input.dataset.testPlay);
+  });
+  els.testPlayOptions.querySelectorAll("[data-test-formation]").forEach(input => {
+    const formationPlayIds = plays
+      .filter(play => play.formationId === input.dataset.testFormation)
+      .map(play => play.id);
+    const selectedCount = formationPlayIds.filter(id => testPlayIds.has(id)).length;
+    input.checked = selectedCount === formationPlayIds.length;
+    input.indeterminate = selectedCount > 0 && selectedCount < formationPlayIds.length;
+  });
+  const selectedPlayCount = testPlayIds.size;
+  els.testPlaySummary.textContent = selectedPlayCount === plays.length
+    ? `All plays (${plays.length})`
+    : `${selectedPlayCount} of ${plays.length} plays`;
 }
 
 function renderTestControls() {
   if (!els.testSourceSelect) return;
+  const validPlayIds = new Set(plays.map(play => play.id));
   const validDefenseIds = new Set(defenses.map(defense => defense.id));
+  testPlayIds = new Set([...testPlayIds].filter(id => validPlayIds.has(id)));
   testDefenseIds = new Set([...testDefenseIds].filter(id => validDefenseIds.has(id)));
   els.testSourceSelect.innerHTML = [
     `<option value="all">All Plays (${plays.length})</option>`,
@@ -2209,6 +2267,50 @@ function renderTestControls() {
     testSourceId = "all";
   }
   els.testSourceSelect.value = testSourceId;
+  const playGroups = formations.map(formation => ({
+    formation,
+    formationPlays: plays
+      .filter(play => play.formationId === formation.id)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  })).filter(group => group.formationPlays.length);
+  const unassignedPlays = plays
+    .filter(play => !formations.some(formation => formation.id === play.formationId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  els.testPlayOptions.innerHTML = [
+    ...playGroups.map(({ formation, formationPlays }) => `
+      <details class="test-play-formation">
+        <summary>
+          <label>
+            <input type="checkbox" data-test-formation="${formation.id}">
+            <strong>${escapeHtml(formation.name)}</strong>
+          </label>
+          <small>${formationPlays.length}</small>
+        </summary>
+        <div>
+          ${formationPlays.map(play => `
+            <label class="test-play-option">
+              <input type="checkbox" data-test-play="${play.id}" ${testPlayIds.has(play.id) ? "checked" : ""}>
+              <span>${escapeHtml(play.name)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </details>
+    `),
+    unassignedPlays.length ? `
+      <details class="test-play-formation">
+        <summary><strong>Other plays</strong><small>${unassignedPlays.length}</small></summary>
+        <div>
+          ${unassignedPlays.map(play => `
+            <label class="test-play-option">
+              <input type="checkbox" data-test-play="${play.id}" ${testPlayIds.has(play.id) ? "checked" : ""}>
+              <span>${escapeHtml(play.name)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </details>
+    ` : ""
+  ].join("");
+  refreshTestPlaySelectionUi();
   els.testSpeedSelect.value = String(runSpeed);
   els.testDefenseOptions.innerHTML = defenses.map(defense => `
     <label class="test-defense-option">
@@ -2221,21 +2323,29 @@ function renderTestControls() {
     ? `All defenses (${defenses.length})`
     : `${selectedDefenseCount} of ${defenses.length} defenses`;
   const revealButton = document.querySelector("#revealTestButton");
+  const sessionButton = document.querySelector("#newTestRoundButton");
+  const sessionComplete = testRoundReady
+    && testSessionPlayIds.length
+    && testSessionIndex >= testSessionPlayIds.length - 1;
+  sessionButton.textContent = !testRoundReady
+    ? "Start Test"
+    : sessionComplete ? "Restart Test" : "Next Play";
   revealButton.disabled = !testRoundReady;
   revealButton.textContent = testAnswerRevealed ? "Hide Answer" : "Reveal Answer";
   document.querySelector("#runTestButton").disabled = !testRoundReady;
   document.querySelector("#resetTestButton").disabled = !testRoundReady;
   els.testStatus.textContent = !testRoundReady
-    ? "Choose a source, then start a random test."
+    ? "Choose your plays and defenses, then start the test."
     : testAnswerRevealed
-      ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-      : "Read the alignment, then run the rep and identify what comes open.";
+      ? `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
+      : `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name}`;
 }
 
-function startRandomTestRound() {
-  const eligible = testEligiblePlays();
+function loadNextTestPlay() {
+  let eligible = testEligiblePlays();
   if (!eligible.length) {
-    window.alert("That folder does not contain any plays yet.");
+    window.alert("No selected plays are available from that source.");
+    document.querySelector("#testPlayPicker").open = true;
     return;
   }
   const eligibleDefenses = defenses.filter(defense => testDefenseIds.has(defense.id));
@@ -2244,21 +2354,25 @@ function startRandomTestRound() {
     document.querySelector("#testDefensePicker").open = true;
     return;
   }
+  const sessionComplete = testRoundReady
+    && testSessionPlayIds.length
+    && testSessionIndex >= testSessionPlayIds.length - 1;
+  if (!testRoundReady || sessionComplete) {
+    testSessionPlayIds = shuffledIds(eligible);
+    testSessionIndex = -1;
+  }
   stopAnimationPlayback();
-  let play = eligible[Math.floor(Math.random() * eligible.length)];
-  let defense = eligibleDefenses[Math.floor(Math.random() * eligibleDefenses.length)];
-  if ((eligible.length * eligibleDefenses.length) > 1) {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      const combination = `${play.id}:${defense.id}`;
-      if (combination !== lastTestCombination) break;
-      play = eligible[Math.floor(Math.random() * eligible.length)];
-      defense = eligibleDefenses[Math.floor(Math.random() * eligibleDefenses.length)];
-    }
+  testSessionIndex += 1;
+  const play = plays.find(candidate => candidate.id === testSessionPlayIds[testSessionIndex]);
+  const defense = eligibleDefenses[Math.floor(Math.random() * eligibleDefenses.length)];
+  if (!play) {
+    resetTestSession();
+    render();
+    return;
   }
   selectedPlayId = play.id;
   selectedFormationId = play.formationId || formations[0].id;
   selectedDefenseId = defense.id;
-  lastTestCombination = `${play.id}:${defense.id}`;
   testAnswerRevealed = false;
   testRoundReady = true;
   resetRunScenario();
@@ -2518,11 +2632,24 @@ function renderRoutesAndPlayers() {
     const playerPosition = offensePosition(position.id);
     const motion = showOffensiveRoutes ? currentMotion(position.id) : [];
     const snapPosition = motionEnd(basePlayerPosition, motion);
-    const route = showOffensiveRoutes ? postSnapRoute(position.id, basePlayerPosition) : [];
+    const baseRoute = currentPlay().routes[position.id] || [];
+    const routeOffset = {
+      x: snapPosition.x - basePlayerPosition.x,
+      y: snapPosition.y - basePlayerPosition.y
+    };
+    const route = showOffensiveRoutes
+      ? appTab === "test" && !testAnswerRevealed
+        ? baseRoute.map(point => ({
+            ...point,
+            x: point.x + routeOffset.x,
+            y: point.y + routeOffset.y
+          }))
+        : postSnapRoute(position.id, basePlayerPosition)
+      : [];
     const isSelectedOption = appTab === "create" && createScreen === "play"
       && activeRouteSide === "offense" && activeRouteId === position.id
       && selectedRouteOptionId !== "base";
-    const runOption = isRunLikeMode()
+    const runOption = appTab === "run" || (appTab === "test" && testAnswerRevealed)
       ? matchedRouteOption(currentPlay(), position.id, selectedDefenseId)
       : null;
     const showSplitRunOption = Boolean(
@@ -2531,10 +2658,6 @@ function renderRoutesAndPlayers() {
       && runOption.points.length
       && !scenarioEditing
     );
-    const routeOffset = {
-      x: snapPosition.x - basePlayerPosition.x,
-      y: snapPosition.y - basePlayerPosition.y
-    };
     appendRoutePath(els.routes, basePlayerPosition, motion, {
       fill: "none",
       stroke: "#76d7ff",
@@ -2593,8 +2716,8 @@ function renderRoutesAndPlayers() {
         filter: "url(#shadow)"
       });
     }
-    if (appTab === "create" && createScreen === "play") {
-      const baseRoute = currentPlay().routes[position.id] || [];
+    if ((appTab === "create" && createScreen === "play")
+      || (appTab === "test" && !testAnswerRevealed)) {
       routeOptionsFor(currentPlay(), position.id).forEach(option => {
         const storedAnchor = routeAnchorPoint(basePlayerPosition, baseRoute, option.anchor);
         if (!storedAnchor) return;
@@ -2631,7 +2754,7 @@ function renderRoutesAndPlayers() {
         }));
       });
 
-      if (isSelectedOption && baseRoute.length) {
+      if (appTab === "create" && isSelectedOption && baseRoute.length) {
         const displayedBaseRoute = baseRoute.map(point => ({
           ...point,
           x: point.x + routeOffset.x,
@@ -2837,9 +2960,10 @@ function defender(x, y, label = "") {
   const id = `D${defenderRenderIndex}`;
   defenderRenderIndex += 1;
   currentDefense().labels ||= {};
-  const displayLabel = appTab === "test" && !testAnswerRevealed
-    ? label || String(defenderRenderIndex)
-    : currentDefense().labels[id] || label || id;
+  const savedLabel = currentDefense().labels[id];
+  const displayLabel = appTab === "test" && /^(?:D)?\d+$/i.test(savedLabel || "")
+    ? label || id
+    : savedLabel || label || id;
   const saved = isRunLikeMode()
     ? (runScenario?.defensePositions[id] || currentDefense().positions[id])
     : currentDefense().positions[id];
@@ -3060,7 +3184,7 @@ function renderDefense() {
   const defaults = defaultDefensePositions();
   Object.keys(defaults).forEach((id, index) => {
     const point = defaults[id];
-    defender(point.x, point.y, String(index + 1));
+    defender(point.x, point.y, defensePositionLabels[index] || "DEF");
   });
 }
 
@@ -3246,9 +3370,9 @@ function getRankedReads() {
 function renderReads() {
   els.coachCue.textContent = "Build it, save it, and rep it against any defense.";
   if (appTab === "test") {
-    els.boardTitle.textContent = testAnswerRevealed && testRoundReady
-      ? `${currentPlay().name} | ${currentFormation().name} vs. ${currentDefense().name}`
-      : "Read the Defense";
+    els.boardTitle.textContent = testRoundReady
+      ? `${currentPlay().name} | ${currentFormation().name}`
+      : "Test Your Reads";
   } else if (appTab === "run") {
     els.boardTitle.textContent = `${currentPlay().name} | ${currentFormation().name} vs. ${currentDefense().name}`;
   } else if (createScreen === "formation") {
@@ -3385,10 +3509,10 @@ function render() {
   els.leftPanelTitle.textContent = screenCopy[1];
   els.fieldNote.textContent = appTab === "test"
     ? (!testRoundReady
-        ? "Start a random test to load a hidden play and defense."
+        ? "Choose the plays and defenses for this session, then start the test."
         : testAnswerRevealed
           ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-          : "The offensive play is shown. Diagnose the defensive shell and identify what comes open.")
+          : `${currentFormation().name} / ${currentPlay().name}. Diagnose the defensive shell and identify what comes open.`)
     : appTab === "run"
     ? (activeRunRouteOptions().length
         ? `Active options: ${activeRunRouteOptions().map(item =>
@@ -4386,10 +4510,49 @@ document.querySelector("#runPlayButton").addEventListener("click", () => {
 
 els.testSourceSelect.addEventListener("change", event => {
   testSourceId = event.target.value;
-  testRoundReady = false;
-  testAnswerRevealed = false;
-  stopAnimationPlayback();
+  resetTestSession();
   render();
+});
+
+els.testPlayOptions.addEventListener("change", event => {
+  const playId = event.target.dataset.testPlay;
+  const formationId = event.target.dataset.testFormation;
+  if (playId) {
+    if (event.target.checked) {
+      testPlayIds.add(playId);
+    } else {
+      testPlayIds.delete(playId);
+    }
+  } else if (formationId) {
+    plays
+      .filter(play => play.formationId === formationId)
+      .forEach(play => {
+        if (event.target.checked) {
+          testPlayIds.add(play.id);
+        } else {
+          testPlayIds.delete(play.id);
+        }
+      });
+  } else {
+    return;
+  }
+  resetTestSession();
+  refreshTestPlaySelectionUi();
+  els.testStatus.textContent = "Play selection updated. Start the test.";
+});
+
+document.querySelector("#selectAllTestPlays").addEventListener("click", () => {
+  testPlayIds = new Set(plays.map(play => play.id));
+  resetTestSession();
+  refreshTestPlaySelectionUi();
+  els.testStatus.textContent = "All plays selected. Start the test.";
+});
+
+document.querySelector("#clearTestPlays").addEventListener("click", () => {
+  testPlayIds.clear();
+  resetTestSession();
+  refreshTestPlaySelectionUi();
+  els.testStatus.textContent = "No plays selected.";
 });
 
 els.testSpeedSelect.addEventListener("change", event => {
@@ -4404,20 +4567,23 @@ els.testDefenseOptions.addEventListener("change", event => {
   } else {
     testDefenseIds.delete(event.target.value);
   }
+  resetTestSession();
   renderTestControls();
 });
 
 document.querySelector("#selectAllTestDefenses").addEventListener("click", () => {
   testDefenseIds = new Set(defenses.map(defense => defense.id));
+  resetTestSession();
   renderTestControls();
 });
 
 document.querySelector("#clearTestDefenses").addEventListener("click", () => {
   testDefenseIds.clear();
+  resetTestSession();
   renderTestControls();
 });
 
-document.querySelector("#newTestRoundButton").addEventListener("click", startRandomTestRound);
+document.querySelector("#newTestRoundButton").addEventListener("click", loadNextTestPlay);
 
 document.querySelector("#runTestButton").addEventListener("click", () => {
   if (!testRoundReady) return;

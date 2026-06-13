@@ -226,6 +226,19 @@
             <label class="field-label" for="testSourceSelect">Test plays from</label>
             <select id="testSourceSelect"></select>
           </div>
+          <div class="test-play-picker">
+            <label class="field-label">Choose plays</label>
+            <details id="testPlayPicker">
+              <summary id="testPlaySummary">All plays</summary>
+              <div class="test-play-menu">
+                <div class="test-picker-actions">
+                  <button id="selectAllTestPlays" type="button">Select all</button>
+                  <button id="clearTestPlays" type="button">Clear</button>
+                </div>
+                <div id="testPlayOptions" class="test-play-options"></div>
+              </div>
+            </details>
+          </div>
           <div>
             <label class="field-label" for="testSpeedSelect">Speed</label>
             <select id="testSpeedSelect">
@@ -241,7 +254,7 @@
             <details id="testDefensePicker">
               <summary id="testDefenseSummary">All defenses</summary>
               <div class="test-defense-menu">
-                <div class="test-defense-actions">
+                <div class="test-picker-actions">
                   <button id="selectAllTestDefenses" type="button">Select all</button>
                   <button id="clearTestDefenses" type="button">Clear</button>
                 </div>
@@ -249,7 +262,7 @@
               </div>
             </details>
           </div>
-          <button id="newTestRoundButton" class="button button-dark">New Random Test</button>
+          <button id="newTestRoundButton" class="button button-dark">Start Test</button>
           <button id="runTestButton" class="button button-primary">Run Test</button>
           <button id="resetTestButton" class="route-tool-button">Reset</button>
           <button id="revealTestButton" class="route-tool-button">Reveal Answer</button>
