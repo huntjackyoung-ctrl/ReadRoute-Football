@@ -167,6 +167,10 @@
         </div>
 
         <div id="runToolbar" class="run-toolbar hidden">
+          <details id="runPlayBrowser" class="run-play-browser">
+            <summary>Browse Playbook Folders</summary>
+            <div id="runPlayBrowserContent" class="run-play-browser-content"></div>
+          </details>
           <div>
             <label class="field-label" for="runPlaySelect">Play</label>
             <select id="runPlaySelect"></select>
@@ -202,7 +206,13 @@
             <button id="editScenarioButton" class="route-tool-button">Edit Scenario</button>
             <button id="scenarioMoveButton" class="route-tool-button scenario-edit-only">Move</button>
             <button id="scenarioDrawButton" class="route-tool-button scenario-edit-only">Draw</button>
+            <button id="scenarioZoneButton" class="route-tool-button scenario-edit-only">Zone Assignment</button>
             <button id="scenarioManButton" class="route-tool-button scenario-edit-only">Man Assignment</button>
+            <div id="scenarioZoneSizeControl" class="scenario-zone-size scenario-edit-only hidden">
+              <label for="scenarioZoneSizeRange">Zone size</label>
+              <input id="scenarioZoneSizeRange" type="range" min="40" max="300" step="5" value="130">
+              <input id="scenarioZoneSizeInput" type="number" min="40" max="300" step="5" value="130" aria-label="Scenario zone size number">
+            </div>
             <button id="scenarioUndoButton" class="route-tool-button scenario-edit-only">Undo</button>
             <button id="scenarioClearButton" class="route-tool-button scenario-edit-only">Clear Movement</button>
             <button id="scenarioResetButton" class="route-tool-button danger scenario-edit-only">Reset Scenario</button>

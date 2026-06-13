@@ -1116,9 +1116,101 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rg
   background: #fffdf7;
 }
 .run-toolbar .field-label { margin-top: 0; }
+.run-play-browser {
+  grid-column: 1 / -1;
+  border: 1px solid #d8ddcc;
+  border-radius: 7px;
+  background: #f8faef;
+}
+.run-play-browser > summary {
+  padding: 10px 12px;
+  cursor: pointer;
+  color: var(--green-dark);
+  font-size: 11px;
+  font-weight: 900;
+  list-style: none;
+}
+.run-play-browser > summary::-webkit-details-marker,
+.run-browser-folder summary::-webkit-details-marker { display: none; }
+.run-play-browser > summary::before {
+  content: "+";
+  width: 18px;
+  display: inline-block;
+  color: var(--green);
+}
+.run-play-browser[open] > summary::before { content: "-"; }
+.run-play-browser-content {
+  max-height: 330px;
+  padding: 10px;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  border-top: 1px solid #dfe5d4;
+  background: #fff;
+}
+.run-browser-section { min-width: 0; }
+.run-browser-section > .eyebrow { margin: 2px 3px 7px; }
+.run-browser-folder {
+  margin: 5px 0 0 calc(var(--run-folder-depth, 0) * 10px);
+  overflow: hidden;
+  border: 1px solid #e0e5d6;
+  border-radius: 5px;
+  background: #fff;
+}
+.run-browser-folder summary {
+  padding: 8px 9px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  color: var(--ink);
+  background: #f5f7ef;
+  font-size: 10px;
+  font-weight: 900;
+  list-style: none;
+}
+.run-browser-folder summary::before {
+  content: "+";
+  margin-right: 7px;
+  color: var(--green);
+}
+.run-browser-folder[open] > summary::before { content: "-"; }
+.run-browser-folder summary span { flex: 1; }
+.run-browser-folder summary small { color: var(--muted); }
+.run-browser-folder-content {
+  padding: 5px;
+  display: grid;
+  gap: 4px;
+  border-top: 1px solid #e8ece1;
+}
+.run-browser-play {
+  width: 100%;
+  padding: 7px 9px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
+}
+.run-browser-play:hover,
+.run-browser-play.active {
+  color: var(--green-dark);
+  background: #eff7dc;
+}
+.run-browser-play.active { box-shadow: inset 3px 0 0 var(--lime); }
+.run-browser-play span {
+  color: var(--muted);
+  font-size: 8px;
+}
+.run-browser-play strong { font-size: 10px; }
 .scenario-controls {
   grid-column: 1 / -1;
   display: flex;
+  flex-wrap: wrap;
   gap: 7px;
   align-items: center;
   padding-top: 3px;
@@ -1130,6 +1222,29 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   color: var(--green-dark);
   border-color: var(--lime);
   background: var(--lime);
+}
+.scenario-zone-size {
+  display: grid;
+  grid-template-columns: auto 110px 62px;
+  gap: 6px;
+  align-items: center;
+}
+.scenario-zone-size.hidden { display: none !important; }
+.scenario-zone-size label {
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 850;
+}
+.scenario-zone-size input[type="range"] {
+  width: 110px;
+  padding: 0;
+  accent-color: var(--green);
+}
+.scenario-zone-size input[type="number"] {
+  width: 62px;
+  padding: 6px;
+  font-size: 9px;
+  text-align: center;
 }
 .scenario-status {
   margin-left: auto;
@@ -1257,6 +1372,24 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   box-shadow: 0 12px 35px rgba(11,30,22,.18);
   background: var(--green);
 }
+.field-card::after {
+  content: "PAUSED - CLICK FIELD TO RESUME";
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(6,25,17,.48);
+  font-size: clamp(13px, 2vw, 24px);
+  font-weight: 950;
+  letter-spacing: .08em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .12s ease;
+}
+.field-card.playback-paused::after { opacity: 1; }
+.field-card.playback-paused #field { cursor: pointer; }
 #field { width: 100%; display: block; cursor: crosshair; touch-action: none; }
 #field.move-mode { cursor: default; }
 #scrimmageLine { transition: stroke .12s ease, stroke-width .12s ease; }
@@ -1649,6 +1782,7 @@ body.create-defense #newPlayButton {
   .route-toolbar { flex-wrap: wrap; }
   .route-help { width: 100%; order: 4; flex-basis: 100%; }
   .run-toolbar { grid-template-columns: 1fr 1fr; }
+  .run-play-browser-content { grid-template-columns: 1fr; }
   .create-subnav { padding: 12px 12px 0; overflow-x: auto; justify-content: start; }
   .create-subtab { min-width: 135px; padding: 9px 10px; font-size: 11px; }
   .playbook-library { margin: 14px 12px 36px; padding: 18px; }

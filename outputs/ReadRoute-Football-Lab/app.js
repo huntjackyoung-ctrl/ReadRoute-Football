@@ -117,6 +117,7 @@ let dragState = null;
 let suppressFieldClickUntil = 0;
 let animationFrame = null;
 let animationState = null;
+let animationPlayback = null;
 let runSpeed = 1;
 let runDefenseMovement = true;
 let runScenario = null;
@@ -125,6 +126,7 @@ let scenarioTool = "move";
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 const libraryFolderOpenState = new Map();
+const runFolderOpenState = new Map();
 let saveToastTimer = null;
 let autosaveTimer = null;
 let lastSavedSignature = "";
@@ -145,6 +147,8 @@ const els = {
   runDefenseSelect: document.querySelector("#runDefenseSelect"),
   runSpeedSelect: document.querySelector("#runSpeedSelect"),
   runDefenseMovementSelect: document.querySelector("#runDefenseMovementSelect"),
+  runPlayBrowser: document.querySelector("#runPlayBrowser"),
+  runPlayBrowserContent: document.querySelector("#runPlayBrowserContent"),
   defenseSelect: document.querySelector("#defenseSelect"),
   defenseName: document.querySelector("#defenseName"),
   defenseLabels: document.querySelector("#defenseLabels"),
@@ -161,6 +165,7 @@ const els = {
   boardModeStatus: document.querySelector("#boardModeStatus"),
   routeHelp: document.querySelector("#routeHelp"),
   field: document.querySelector("#field"),
+  fieldCard: document.querySelector(".field-card"),
   fieldStandardSelect: document.querySelector("#fieldStandardSelect"),
   leftPanelEyebrow: document.querySelector("#leftPanelEyebrow"),
   leftPanelTitle: document.querySelector("#leftPanelTitle"),
@@ -169,6 +174,9 @@ const els = {
   notes: document.querySelector("#notes"),
   saveToast: document.querySelector("#saveToast"),
   scenarioStatus: document.querySelector("#scenarioStatus"),
+  scenarioZoneSizeControl: document.querySelector("#scenarioZoneSizeControl"),
+  scenarioZoneSizeRange: document.querySelector("#scenarioZoneSizeRange"),
+  scenarioZoneSizeInput: document.querySelector("#scenarioZoneSizeInput"),
   defensePathHelp: document.querySelector("#defensePathHelp"),
   zoneSizeControl: document.querySelector("#zoneSizeControl"),
   zoneSizeRange: document.querySelector("#zoneSizeRange"),
@@ -1976,6 +1984,136 @@ function renderDefenseControls() {
   }
 }
 
+function rememberRunFolderState() {
+  els.runPlayBrowser
+    ?.querySelectorAll("[data-run-folder-state]")
+    .forEach(folder => {
+      runFolderOpenState.set(folder.dataset.runFolderState, folder.open);
+    });
+  if (els.runPlayBrowser) {
+    runFolderOpenState.set("browser", els.runPlayBrowser.open);
+  }
+}
+
+function runFolderOpenAttribute(key, openByDefault = false) {
+  const saved = runFolderOpenState.get(key);
+  return (saved ?? openByDefault) ? " open" : "";
+}
+
+function selectRunPlay(playId) {
+  const play = plays.find(candidate => candidate.id === playId);
+  if (!play) return;
+  rememberRunFolderState();
+  selectedPlayId = play.id;
+  selectedFormationId = play.formationId || selectedFormationId;
+  stopAnimationPlayback();
+  resetRunScenario();
+  renderPlayControls();
+  render();
+}
+
+function runPlayButtonMarkup(play) {
+  const formation = formations.find(candidate => candidate.id === play.formationId);
+  return `
+    <button
+      class="run-browser-play ${play.id === selectedPlayId ? "active" : ""}"
+      data-run-browser-play="${play.id}"
+    >
+      <span>${escapeHtml(formation?.name || "Formation")}</span>
+      <strong>${escapeHtml(play.name)}</strong>
+    </button>
+  `;
+}
+
+function runCustomFolderMarkup(folder, depth = 0) {
+  const children = libraryFolders
+    .filter(candidate => candidate.parentId === folder.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const folderPlays = plays
+    .filter(play =>
+      itemFolderIds(libraryItemKey("play", play.id)).includes(folder.id)
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return `
+    <details
+      class="run-browser-folder"
+      style="--run-folder-depth:${depth}"
+      data-run-folder-state="custom:${folder.id}"
+      ${runFolderOpenAttribute(`custom:${folder.id}`)}
+    >
+      <summary>
+        <span>${escapeHtml(folder.name)}</span>
+        <small>${folderPlays.length + children.length}</small>
+      </summary>
+      <div class="run-browser-folder-content">
+        ${children.map(child => runCustomFolderMarkup(child, depth + 1)).join("")}
+        ${folderPlays.map(runPlayButtonMarkup).join("")}
+        ${!children.length && !folderPlays.length
+          ? `<p class="library-empty">This folder has no plays.</p>`
+          : ""}
+      </div>
+    </details>
+  `;
+}
+
+function renderRunPlayBrowser() {
+  if (!els.runPlayBrowserContent) return;
+  rememberRunFolderState();
+  els.runPlayBrowser.open = runFolderOpenState.get("browser") || false;
+  const rootFolders = libraryFolders
+    .filter(folder =>
+      !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId)
+    )
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const formationFolders = formations
+    .map(formation => ({
+      formation,
+      formationPlays: plays
+        .filter(play => play.formationId === formation.id)
+        .sort((a, b) => a.name.localeCompare(b.name))
+    }))
+    .filter(group => group.formationPlays.length);
+
+  els.runPlayBrowserContent.innerHTML = `
+    ${rootFolders.length ? `
+      <div class="run-browser-section">
+        <p class="eyebrow">Custom folders</p>
+        ${rootFolders.map(folder => runCustomFolderMarkup(folder)).join("")}
+      </div>
+    ` : ""}
+    <div class="run-browser-section">
+      <p class="eyebrow">Formations</p>
+      ${formationFolders.map(({ formation, formationPlays }) => `
+        <details
+          class="run-browser-folder"
+          data-run-folder-state="formation:${formation.id}"
+          ${runFolderOpenAttribute(`formation:${formation.id}`)}
+        >
+          <summary>
+            <span>${escapeHtml(formation.name)}</span>
+            <small>${formationPlays.length}</small>
+          </summary>
+          <div class="run-browser-folder-content">
+            ${formationPlays.map(runPlayButtonMarkup).join("")}
+          </div>
+        </details>
+      `).join("")}
+    </div>
+  `;
+
+  els.runPlayBrowser.querySelectorAll("[data-run-folder-state]").forEach(folder => {
+    folder.addEventListener("toggle", () => {
+      runFolderOpenState.set(folder.dataset.runFolderState, folder.open);
+    });
+  });
+  els.runPlayBrowser.querySelectorAll("[data-run-browser-play]").forEach(button => {
+    button.addEventListener("click", () => selectRunPlay(button.dataset.runBrowserPlay));
+  });
+  els.runPlayBrowser.ontoggle = () => {
+    runFolderOpenState.set("browser", els.runPlayBrowser.open);
+  };
+}
+
 function renderRunControls() {
   const runnableFormations = formations.filter(formation =>
     plays.some(play => play.formationId === formation.id)
@@ -2009,6 +2147,7 @@ function renderRunControls() {
   els.runDefenseSelect.value = selectedDefenseId;
   els.runSpeedSelect.value = String(runSpeed);
   els.runDefenseMovementSelect.value = runDefenseMovement ? "on" : "off";
+  renderRunPlayBrowser();
 }
 
 function applyFormation(formation) {
@@ -2186,8 +2325,9 @@ function makeMovable(group, side, id) {
     event.stopPropagation();
     const createMove = appTab === "create" && boardMode === "move"
       && ((side === "offense" && createScreen === "formation") || (side === "defense" && createScreen === "defense"));
+    const defenseOnlyScenarioTool = scenarioTool === "man" || scenarioTool === "zone";
     const scenarioSelect = appTab === "run" && scenarioEditing
-      && (scenarioTool !== "man" || side === "defense");
+      && (!defenseOnlyScenarioTool || side === "defense");
     if (!createMove && !scenarioSelect) return;
     activeRouteSide = side;
     activeRouteId = id;
@@ -2599,8 +2739,12 @@ function defender(x, y, label = "") {
       "stroke-dasharray": "8 7",
       opacity: selectedZone ? .78 : .42
     });
-    if (selectedZone && appTab === "create" && createScreen === "defense"
-      && defenseAssignmentMode === "zone") {
+    const editingCreateZone = appTab === "create" && createScreen === "defense"
+      && defenseAssignmentMode === "zone";
+    const editingScenarioZone = appTab === "run" && scenarioEditing
+      && scenarioTool === "zone";
+    if (selectedZone && (editingCreateZone || editingScenarioZone)) {
+      zoneElement.addEventListener("click", event => event.stopPropagation());
       zoneElement.addEventListener("pointerdown", event => {
         event.preventDefault();
         event.stopPropagation();
@@ -2626,8 +2770,7 @@ function defender(x, y, label = "") {
       "stroke-dasharray": "4 6",
       opacity: selectedZone ? .75 : .3
     }));
-    if (selectedZone && appTab === "create" && createScreen === "defense"
-      && defenseAssignmentMode === "zone") {
+    if (selectedZone && (editingCreateZone || editingScenarioZone)) {
       [
         { kind: "horizontal", direction: "left", x: zoneAssignment.x - radii.x, y: zoneAssignment.y },
         { kind: "horizontal", direction: "right", x: zoneAssignment.x + radii.x, y: zoneAssignment.y },
@@ -2695,7 +2838,8 @@ function defender(x, y, label = "") {
     const createMan = appTab === "create" && createScreen === "defense" && defenseAssignmentMode === "man";
     const createZone = appTab === "create" && createScreen === "defense" && defenseAssignmentMode === "zone";
     const scenarioMan = appTab === "run" && scenarioEditing && scenarioTool === "man";
-    if (!createDraw && !scenarioDraw && !createMan && !scenarioMan && !createZone) return;
+    const scenarioZone = appTab === "run" && scenarioEditing && scenarioTool === "zone";
+    if (!createDraw && !scenarioDraw && !createMan && !scenarioMan && !createZone && !scenarioZone) return;
     activeRouteSide = "defense";
     activeRouteId = id;
     renderPlayControls();
@@ -3014,14 +3158,39 @@ function render() {
   document.querySelector("#editScenarioButton").textContent = scenarioEditing ? "Done Editing" : "Edit Scenario";
   document.querySelector("#scenarioMoveButton").classList.toggle("active", scenarioTool === "move");
   document.querySelector("#scenarioDrawButton").classList.toggle("active", scenarioTool === "draw");
+  document.querySelector("#scenarioZoneButton").classList.toggle("active", scenarioTool === "zone");
   document.querySelector("#scenarioManButton").classList.toggle("active", scenarioTool === "man");
+  document.querySelector("#scenarioClearButton").textContent = scenarioTool === "zone"
+    ? "Clear Zone"
+    : scenarioTool === "man"
+      ? "Clear Assignment"
+      : "Clear Movement";
   document.querySelector("#defensePathModeButton").classList.toggle("active", defenseAssignmentMode === "path");
   document.querySelector("#defenseZoneModeButton").classList.toggle("active", defenseAssignmentMode === "zone");
   document.querySelector("#defenseManModeButton").classList.toggle("active", defenseAssignmentMode === "man");
   document.querySelector("#drawRouteButton").classList.toggle("active", playPathType === "route");
   document.querySelector("#drawMotionButton").classList.toggle("active", playPathType === "motion");
+  const scenarioZone = appTab === "run" && scenarioEditing
+    && scenarioTool === "zone" && activeRouteSide === "defense"
+    ? currentZoneAssignments()[activeRouteId]
+    : null;
+  els.scenarioZoneSizeControl.classList.toggle("hidden", !scenarioZone);
+  if (scenarioZone) {
+    const size = String(Math.round(Math.max(
+      zoneRadii(scenarioZone).x,
+      zoneRadii(scenarioZone).y
+    )));
+    els.scenarioZoneSizeRange.value = size;
+    els.scenarioZoneSizeInput.value = size;
+  }
   els.scenarioStatus.textContent = `${
-    scenarioTool === "move" ? "Moving" : scenarioTool === "man" ? "Assigning man for" : "Drawing"
+    scenarioTool === "move"
+      ? "Moving"
+      : scenarioTool === "man"
+        ? "Assigning man for"
+        : scenarioTool === "zone"
+          ? "Adjusting zone for"
+          : "Drawing"
   } ${
     activeRouteSide === "offense" ? offenseLabel(activeRouteId) : (currentDefense().labels[activeRouteId] || activeRouteId)
   }`;
@@ -3164,9 +3333,7 @@ document.querySelector("#newPlayButton").addEventListener("click", () => {
   preserveDraftBeforeReplacement();
   createScreen = "play";
   appTab = "create";
-  animationState = null;
-  if (animationFrame) cancelAnimationFrame(animationFrame);
-  animationFrame = null;
+  stopAnimationPlayback();
   document.querySelectorAll("[data-app-tab]").forEach(tab => {
     tab.classList.toggle("active", tab.dataset.appTab === "create");
   });
@@ -3306,6 +3473,23 @@ function updateDrawingGuide(event) {
 
 els.field.addEventListener("click", event => {
   if (Date.now() < suppressFieldClickUntil) {
+    return;
+  }
+  if (appTab === "run" && scenarioEditing && scenarioTool === "zone"
+    && activeRouteSide === "defense") {
+    delete currentManAssignments()[activeRouteId];
+    runScenario.defenseRoutes[activeRouteId] = [];
+    const point = eventToFieldPoint(event);
+    const existingZone = currentZoneAssignments()[activeRouteId];
+    const radii = zoneRadii(existingZone);
+    currentZoneAssignments()[activeRouteId] = {
+      ...existingZone,
+      x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
+      y: Math.max(radii.y, Math.min(620 - radii.y, point.y)),
+      radiusX: radii.x,
+      radiusY: radii.y
+    };
+    render();
     return;
   }
   if (appTab === "run" && scenarioEditing && scenarioTool === "draw") {
@@ -3452,8 +3636,13 @@ els.field.addEventListener("pointermove", event => {
       dragState.zone.radiusX,
       dragState.zone.radiusY
     )));
-    els.zoneSizeRange.value = size;
-    els.zoneSizeInput.value = size;
+    if (appTab === "run") {
+      els.scenarioZoneSizeRange.value = size;
+      els.scenarioZoneSizeInput.value = size;
+    } else {
+      els.zoneSizeRange.value = size;
+      els.zoneSizeInput.value = size;
+    }
     renderDefense();
     return;
   }
@@ -3601,19 +3790,14 @@ document.querySelector("#saveDefenseButton").addEventListener("click", () => {
 });
 
 els.runPlaySelect.addEventListener("change", event => {
-  selectedPlayId = event.target.value;
-  selectedFormationId = currentPlay().formationId || selectedFormationId;
-  animationState = null;
-  resetRunScenario();
-  renderPlayControls();
-  render();
+  selectRunPlay(event.target.value);
 });
 
 els.runFormationSelect.addEventListener("change", event => {
   selectedFormationId = event.target.value;
   const firstFormationPlay = plays.find(play => play.formationId === selectedFormationId);
   if (firstFormationPlay) selectedPlayId = firstFormationPlay.id;
-  animationState = null;
+  stopAnimationPlayback();
   resetRunScenario();
   renderPlayControls();
   render();
@@ -3621,7 +3805,7 @@ els.runFormationSelect.addEventListener("change", event => {
 
 els.runDefenseSelect.addEventListener("change", event => {
   selectedDefenseId = event.target.value;
-  animationState = null;
+  stopAnimationPlayback();
   resetRunScenario();
   render();
 });
@@ -3847,10 +4031,16 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   return { x: state.x, y: state.y };
 }
 
-function resetAnimation() {
+function stopAnimationPlayback() {
   if (animationFrame) cancelAnimationFrame(animationFrame);
   animationFrame = null;
   animationState = null;
+  animationPlayback = null;
+  updatePlaybackUi();
+}
+
+function resetAnimation() {
+  stopAnimationPlayback();
   render();
 }
 
@@ -3866,7 +4056,7 @@ document.querySelector("#addNoteButton").addEventListener("click", () => {
 });
 
 function previewMovement(scope) {
-  if (animationFrame) cancelAnimationFrame(animationFrame);
+  stopAnimationPlayback();
   animationState = { offense: {}, defense: {} };
   const startedAt = performance.now();
   const baseSpeed = 115;
@@ -3924,12 +4114,27 @@ function previewMovement(scope) {
     ...defensePaths.map(path => pathDuration(path.start, path.route, baseSpeed))
   );
   const totalDuration = maxMotionDuration + maxPostSnapDuration;
-  let lastFrameAt = startedAt;
+  animationPlayback = {
+    scope,
+    paused: false,
+    pauseStartedAt: 0,
+    pausedDuration: 0,
+    startedAt,
+    lastFrameAt: startedAt,
+    animate: null
+  };
+  updatePlaybackUi();
 
   function animate(now) {
-    const elapsed = ((now - startedAt) / 1000) * playbackScale;
-    const deltaSeconds = Math.min(.05, ((now - lastFrameAt) / 1000) * playbackScale);
-    lastFrameAt = now;
+    if (!animationPlayback || animationPlayback.paused) return;
+    const elapsed = (
+      (now - animationPlayback.startedAt - animationPlayback.pausedDuration) / 1000
+    ) * playbackScale;
+    const deltaSeconds = Math.min(
+      .05,
+      ((now - animationPlayback.lastFrameAt) / 1000) * playbackScale
+    );
+    animationPlayback.lastFrameAt = now;
     if (animateOffense) {
       offensePaths.forEach(({ id, start, motion, snapStart, route }) => {
         animationState.offense[id] = elapsed < maxMotionDuration
@@ -3984,13 +4189,52 @@ function previewMovement(scope) {
       animationFrame = requestAnimationFrame(animate);
     } else {
       animationFrame = null;
+      animationPlayback = null;
+      updatePlaybackUi();
     }
   }
 
+  animationPlayback.animate = animate;
   animationFrame = requestAnimationFrame(animate);
 }
 
+function updatePlaybackUi() {
+  const paused = Boolean(animationPlayback?.paused);
+  els.fieldCard?.classList.toggle("playback-paused", paused);
+  const runButton = document.querySelector("#runPlayButton");
+  if (runButton) runButton.textContent = paused ? "Resume" : "Play";
+}
+
+function toggleRunPlayback() {
+  if (appTab !== "run" || !animationPlayback) return false;
+  if (animationPlayback.paused) {
+    const resumedAt = performance.now();
+    animationPlayback.pausedDuration += resumedAt - animationPlayback.pauseStartedAt;
+    animationPlayback.lastFrameAt = resumedAt;
+    animationPlayback.paused = false;
+    animationFrame = requestAnimationFrame(animationPlayback.animate);
+  } else {
+    animationPlayback.paused = true;
+    animationPlayback.pauseStartedAt = performance.now();
+    if (animationFrame) cancelAnimationFrame(animationFrame);
+    animationFrame = null;
+  }
+  updatePlaybackUi();
+  return true;
+}
+
+els.field.addEventListener("click", event => {
+  if (!animationPlayback || appTab !== "run") return;
+  event.preventDefault();
+  event.stopImmediatePropagation();
+  toggleRunPlayback();
+}, true);
+
 document.querySelector("#runPlayButton").addEventListener("click", () => {
+  if (animationPlayback?.paused) {
+    toggleRunPlayback();
+    return;
+  }
   previewMovement("run");
 });
 
@@ -4161,8 +4405,7 @@ document.querySelector("#deleteRouteOptionButton").addEventListener("click", () 
 document.querySelector("#editScenarioButton").addEventListener("click", () => {
   if (!runScenario) resetRunScenario();
   scenarioEditing = !scenarioEditing;
-  animationState = null;
-  if (animationFrame) cancelAnimationFrame(animationFrame);
+  stopAnimationPlayback();
   render();
 });
 
@@ -4176,6 +4419,13 @@ document.querySelector("#scenarioDrawButton").addEventListener("click", () => {
   render();
 });
 
+document.querySelector("#scenarioZoneButton").addEventListener("click", () => {
+  scenarioTool = "zone";
+  activeRouteSide = "defense";
+  if (!String(activeRouteId).startsWith("D")) activeRouteId = "D0";
+  render();
+});
+
 document.querySelector("#scenarioManButton").addEventListener("click", () => {
   scenarioTool = "man";
   activeRouteSide = "defense";
@@ -4184,6 +4434,11 @@ document.querySelector("#scenarioManButton").addEventListener("click", () => {
 });
 
 document.querySelector("#scenarioUndoButton").addEventListener("click", () => {
+  if (scenarioTool === "zone" && activeRouteSide === "defense") {
+    delete currentZoneAssignments()[activeRouteId];
+    render();
+    return;
+  }
   if (scenarioTool === "man" && activeRouteSide === "defense") {
     delete currentManAssignments()[activeRouteId];
     render();
@@ -4221,7 +4476,9 @@ document.querySelector("#defenseZoneModeButton").addEventListener("click", () =>
 });
 
 function updateSelectedZoneSize(value) {
-  const zone = currentDefense().zoneAssignments?.[activeRouteId];
+  const zone = appTab === "run"
+    ? currentZoneAssignments()[activeRouteId]
+    : currentDefense().zoneAssignments?.[activeRouteId];
   if (!zone) return;
   const size = Math.max(40, Math.min(300, Number(value) || 130));
   const radii = zoneRadii(zone);
@@ -4232,7 +4489,7 @@ function updateSelectedZoneSize(value) {
   delete zone.radius;
   els.zoneSizeRange.value = String(size);
   els.zoneSizeInput.value = String(size);
-  saveDefenses();
+  if (appTab === "create") saveDefenses();
   renderDefense();
 }
 
@@ -4247,6 +4504,29 @@ els.zoneSizeInput.addEventListener("input", event => {
 
 els.zoneSizeInput.addEventListener("change", event => {
   updateSelectedZoneSize(event.target.value);
+});
+
+function updateScenarioZoneSize(value) {
+  if (appTab !== "run" || !scenarioEditing || scenarioTool !== "zone") return;
+  updateSelectedZoneSize(value);
+  const zone = currentZoneAssignments()[activeRouteId];
+  if (!zone) return;
+  const size = String(Math.round(Math.max(zoneRadii(zone).x, zoneRadii(zone).y)));
+  els.scenarioZoneSizeRange.value = size;
+  els.scenarioZoneSizeInput.value = size;
+}
+
+els.scenarioZoneSizeRange.addEventListener("input", event => {
+  updateScenarioZoneSize(event.target.value);
+});
+
+els.scenarioZoneSizeInput.addEventListener("input", event => {
+  if (event.target.value === "") return;
+  updateScenarioZoneSize(event.target.value);
+});
+
+els.scenarioZoneSizeInput.addEventListener("change", event => {
+  updateScenarioZoneSize(event.target.value);
 });
 
 document.querySelector("#defenseManModeButton").addEventListener("click", () => {
@@ -4289,8 +4569,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button => {
     }
     if (appTab === "run") resetRunScenario();
     if (appTab !== "run") scenarioEditing = false;
-    animationState = null;
-    if (animationFrame) cancelAnimationFrame(animationFrame);
+    stopAnimationPlayback();
     syncTabButtons();
     render();
   });
