@@ -123,6 +123,11 @@ let runDefenseMovement = true;
 let runScenario = null;
 let scenarioEditing = false;
 let scenarioTool = "move";
+let testSourceId = "all";
+let testDefenseIds = new Set(defenses.map(defense => defense.id));
+let testAnswerRevealed = false;
+let testRoundReady = false;
+let lastTestCombination = "";
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 const libraryFolderOpenState = new Map();
@@ -149,6 +154,11 @@ const els = {
   runDefenseMovementSelect: document.querySelector("#runDefenseMovementSelect"),
   runPlayBrowser: document.querySelector("#runPlayBrowser"),
   runPlayBrowserContent: document.querySelector("#runPlayBrowserContent"),
+  testSourceSelect: document.querySelector("#testSourceSelect"),
+  testSpeedSelect: document.querySelector("#testSpeedSelect"),
+  testDefenseOptions: document.querySelector("#testDefenseOptions"),
+  testDefenseSummary: document.querySelector("#testDefenseSummary"),
+  testStatus: document.querySelector("#testStatus"),
   defenseSelect: document.querySelector("#defenseSelect"),
   defenseName: document.querySelector("#defenseName"),
   defenseLabels: document.querySelector("#defenseLabels"),
@@ -527,6 +537,10 @@ function currentDefense() {
   return defenses.find(defense => defense.id === selectedDefenseId) || defenses[0];
 }
 
+function isRunLikeMode() {
+  return appTab === "run" || appTab === "test";
+}
+
 function createRunScenario() {
   return {
     offensePositions: structuredClone(currentFormation().offensePositions),
@@ -559,7 +573,7 @@ function runScenarioRoute(side, id) {
 }
 
 function currentManAssignments() {
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     if (!runScenario) resetRunScenario();
     return runScenario.manAssignments;
   }
@@ -568,7 +582,7 @@ function currentManAssignments() {
 }
 
 function currentZoneAssignments() {
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     if (!runScenario) resetRunScenario();
     return runScenario.zoneAssignments ||= {};
   }
@@ -580,7 +594,7 @@ function assignMan(defenderId, offenseId) {
   const assignments = currentManAssignments();
   assignments[defenderId] = offenseId;
   delete currentZoneAssignments()[defenderId];
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     runScenario.defenseRoutes[defenderId] = [];
   } else {
     currentDefense().routes[defenderId] = [];
@@ -590,7 +604,7 @@ function assignMan(defenderId, offenseId) {
 function clearDefenderAssignment(defenderId) {
   delete currentManAssignments()[defenderId];
   delete currentZoneAssignments()[defenderId];
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     runScenario.defenseRoutes[defenderId] = [];
   } else {
     currentDefense().routes[defenderId] = [];
@@ -598,7 +612,7 @@ function clearDefenderAssignment(defenderId) {
 }
 
 function currentMotion(id) {
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     if (!runScenario) resetRunScenario();
     return runScenario.offenseMotions[id] ||= [];
   }
@@ -734,7 +748,7 @@ function currentNoteOwner() {
 }
 
 function visibleNotes() {
-  if (appTab === "run") return [];
+  if (isRunLikeMode()) return [];
   return currentNoteOwner().notes || [];
 }
 
@@ -746,7 +760,7 @@ function showSaveSuccess(message = "Saved successfully") {
 }
 
 function offenseLabel(id) {
-  const labels = appTab === "run" || createScreen === "formation" || createScreen === "defense"
+  const labels = isRunLikeMode() || createScreen === "formation" || createScreen === "defense"
     ? currentFormation().labels
     : currentPlay().labels;
   return labels[id] || id;
@@ -763,7 +777,7 @@ function activeRouteDisplayLabel() {
 }
 
 function editorOffensePositions() {
-  if (appTab === "run") {
+  if (isRunLikeMode()) {
     if (!runScenario) resetRunScenario();
     return runScenario.offensePositions;
   }
@@ -2150,6 +2164,107 @@ function renderRunControls() {
   renderRunPlayBrowser();
 }
 
+function nestedFolderIds(folderId) {
+  const ids = new Set([folderId]);
+  let added = true;
+  while (added) {
+    added = false;
+    libraryFolders.forEach(folder => {
+      if (folder.parentId && ids.has(folder.parentId) && !ids.has(folder.id)) {
+        ids.add(folder.id);
+        added = true;
+      }
+    });
+  }
+  return ids;
+}
+
+function testEligiblePlays() {
+  if (testSourceId === "all") return plays;
+  const folderIds = nestedFolderIds(testSourceId);
+  return plays.filter(play =>
+    itemFolderIds(libraryItemKey("play", play.id))
+      .some(folderId => folderIds.has(folderId))
+  );
+}
+
+function renderTestControls() {
+  if (!els.testSourceSelect) return;
+  const validDefenseIds = new Set(defenses.map(defense => defense.id));
+  testDefenseIds = new Set([...testDefenseIds].filter(id => validDefenseIds.has(id)));
+  els.testSourceSelect.innerHTML = [
+    `<option value="all">All Plays (${plays.length})</option>`,
+    ...libraryFolders
+      .slice()
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map(folder => {
+        const count = plays.filter(play =>
+          itemFolderIds(libraryItemKey("play", play.id))
+            .some(folderId => nestedFolderIds(folder.id).has(folderId))
+        ).length;
+        return `<option value="${folder.id}">${escapeHtml(folder.name)} (${count})</option>`;
+      })
+  ].join("");
+  if (![...els.testSourceSelect.options].some(option => option.value === testSourceId)) {
+    testSourceId = "all";
+  }
+  els.testSourceSelect.value = testSourceId;
+  els.testSpeedSelect.value = String(runSpeed);
+  els.testDefenseOptions.innerHTML = defenses.map(defense => `
+    <label class="test-defense-option">
+      <input type="checkbox" value="${defense.id}" ${testDefenseIds.has(defense.id) ? "checked" : ""}>
+      <span>${escapeHtml(defense.name)}</span>
+    </label>
+  `).join("");
+  const selectedDefenseCount = testDefenseIds.size;
+  els.testDefenseSummary.textContent = selectedDefenseCount === defenses.length
+    ? `All defenses (${defenses.length})`
+    : `${selectedDefenseCount} of ${defenses.length} defenses`;
+  const revealButton = document.querySelector("#revealTestButton");
+  revealButton.disabled = !testRoundReady;
+  revealButton.textContent = testAnswerRevealed ? "Hide Answer" : "Reveal Answer";
+  document.querySelector("#runTestButton").disabled = !testRoundReady;
+  document.querySelector("#resetTestButton").disabled = !testRoundReady;
+  els.testStatus.textContent = !testRoundReady
+    ? "Choose a source, then start a random test."
+    : testAnswerRevealed
+      ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
+      : "Read the alignment, then run the rep and identify what comes open.";
+}
+
+function startRandomTestRound() {
+  const eligible = testEligiblePlays();
+  if (!eligible.length) {
+    window.alert("That folder does not contain any plays yet.");
+    return;
+  }
+  const eligibleDefenses = defenses.filter(defense => testDefenseIds.has(defense.id));
+  if (!eligibleDefenses.length) {
+    window.alert("Select at least one defense for the test.");
+    document.querySelector("#testDefensePicker").open = true;
+    return;
+  }
+  stopAnimationPlayback();
+  let play = eligible[Math.floor(Math.random() * eligible.length)];
+  let defense = eligibleDefenses[Math.floor(Math.random() * eligibleDefenses.length)];
+  if ((eligible.length * eligibleDefenses.length) > 1) {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const combination = `${play.id}:${defense.id}`;
+      if (combination !== lastTestCombination) break;
+      play = eligible[Math.floor(Math.random() * eligible.length)];
+      defense = eligibleDefenses[Math.floor(Math.random() * eligibleDefenses.length)];
+    }
+  }
+  selectedPlayId = play.id;
+  selectedFormationId = play.formationId || formations[0].id;
+  selectedDefenseId = defense.id;
+  lastTestCombination = `${play.id}:${defense.id}`;
+  testAnswerRevealed = false;
+  testRoundReady = true;
+  resetRunScenario();
+  render();
+}
+
 function applyFormation(formation) {
   if (!formation) return;
   currentPlay().formationId = formation.id;
@@ -2288,7 +2403,7 @@ function offensePosition(id) {
 }
 
 function routeForFormation(id) {
-  if (appTab === "run") return runScenarioRoute("offense", id);
+  if (isRunLikeMode()) return runScenarioRoute("offense", id);
   return currentPlay().routes[id] || [];
 }
 
@@ -2395,7 +2510,9 @@ function renderRoutesAndPlayers() {
   els.routes.innerHTML = "";
   els.players.innerHTML = "";
   els.activeRouteLabel.textContent = activeRouteDisplayLabel();
-  const showOffensiveRoutes = appTab === "run" || (appTab === "create" && createScreen === "play");
+  const showTestAnswers = appTab === "test" && testAnswerRevealed;
+  const showOffensiveRoutes = isRunLikeMode()
+    || (appTab === "create" && createScreen === "play");
   skillPositions.forEach(position => {
     const basePlayerPosition = editorOffensePositions()[position.id];
     const playerPosition = offensePosition(position.id);
@@ -2405,10 +2522,15 @@ function renderRoutesAndPlayers() {
     const isSelectedOption = appTab === "create" && createScreen === "play"
       && activeRouteSide === "offense" && activeRouteId === position.id
       && selectedRouteOptionId !== "base";
-    const runOption = appTab === "run"
+    const runOption = isRunLikeMode()
       ? matchedRouteOption(currentPlay(), position.id, selectedDefenseId)
       : null;
-    const showSplitRunOption = Boolean(runOption?.anchor && runOption.points.length && !scenarioEditing);
+    const showSplitRunOption = Boolean(
+      showOffensiveRoutes
+      && runOption?.anchor
+      && runOption.points.length
+      && !scenarioEditing
+    );
     const routeOffset = {
       x: snapPosition.x - basePlayerPosition.x,
       y: snapPosition.y - basePlayerPosition.y
@@ -2642,7 +2764,7 @@ function renderRoutesAndPlayers() {
   offensiveLine.forEach(lineman => {
     const basePlayerPosition = editorOffensePositions()[lineman.id];
     const playerPosition = offensePosition(lineman.id);
-    const route = appTab === "run" ? routeForFormation(lineman.id) : [];
+    const route = isRunLikeMode() ? routeForFormation(lineman.id) : [];
     appendRoutePath(els.routes, basePlayerPosition, route, {
       fill: "none",
       stroke: "#f2c35a",
@@ -2678,7 +2800,7 @@ function renderRoutesAndPlayers() {
 
   const qbStart = editorOffensePositions().QB;
   const qbPosition = offensePosition("QB");
-  const qbRoute = appTab === "run" ? routeForFormation("QB") : [];
+  const qbRoute = isRunLikeMode() ? routeForFormation("QB") : [];
   appendRoutePath(els.routes, qbStart, qbRoute, {
     fill: "none",
     stroke: "#f2c35a",
@@ -2715,16 +2837,21 @@ function defender(x, y, label = "") {
   const id = `D${defenderRenderIndex}`;
   defenderRenderIndex += 1;
   currentDefense().labels ||= {};
-  const displayLabel = currentDefense().labels[id] || label || id;
-  const saved = appTab === "run"
+  const displayLabel = appTab === "test" && !testAnswerRevealed
+    ? label || String(defenderRenderIndex)
+    : currentDefense().labels[id] || label || id;
+  const saved = isRunLikeMode()
     ? (runScenario?.defensePositions[id] || currentDefense().positions[id])
     : currentDefense().positions[id];
   defenderStarts[id] = saved || { x, y };
   const playerPosition = animationState?.defense?.[id] || saved || { x, y };
-  const route = appTab === "run" ? runScenarioRoute("defense", id) : (currentDefense().routes[id] || []);
+  const route = isRunLikeMode()
+    ? runScenarioRoute("defense", id)
+    : (currentDefense().routes[id] || []);
   const manTarget = currentManAssignments()[id];
   const zoneAssignment = currentZoneAssignments()[id];
-  if (zoneAssignment) {
+  const showTestAnswers = appTab !== "test" || testAnswerRevealed;
+  if (zoneAssignment && showTestAnswers) {
     const selectedZone = activeRouteSide === "defense" && activeRouteId === id;
     const radii = zoneRadii(zoneAssignment);
     const zoneElement = svgEl("ellipse", {
@@ -2799,7 +2926,7 @@ function defender(x, y, label = "") {
       });
     }
   }
-  if (manTarget) {
+  if (manTarget && showTestAnswers) {
     const targetPoint = offensePosition(manTarget);
     els.zones.append(svgEl("line", {
       x1: playerPosition.x,
@@ -2812,7 +2939,7 @@ function defender(x, y, label = "") {
       opacity: activeRouteSide === "defense" && activeRouteId === id ? .95 : .48
     }));
   }
-  if (route.length) {
+  if (route.length && showTestAnswers) {
     appendRoutePath(els.routes, saved || { x, y }, route, {
       fill: "none",
       stroke: "#ed7048",
@@ -3118,7 +3245,11 @@ function getRankedReads() {
 
 function renderReads() {
   els.coachCue.textContent = "Build it, save it, and rep it against any defense.";
-  if (appTab === "run") {
+  if (appTab === "test") {
+    els.boardTitle.textContent = testAnswerRevealed && testRoundReady
+      ? `${currentPlay().name} | ${currentFormation().name} vs. ${currentDefense().name}`
+      : "Read the Defense";
+  } else if (appTab === "run") {
     els.boardTitle.textContent = `${currentPlay().name} | ${currentFormation().name} vs. ${currentDefense().name}`;
   } else if (createScreen === "formation") {
     els.boardTitle.textContent = currentFormation().name;
@@ -3144,12 +3275,14 @@ function syncTabButtons() {
 
 function render() {
   document.body.classList.toggle("run-view", appTab === "run");
+  document.body.classList.toggle("test-view", appTab === "test");
   document.body.classList.toggle("playbook-view", appTab === "playbook");
   document.body.classList.toggle("create-formation", appTab === "create" && createScreen === "formation");
   document.body.classList.toggle("create-play", appTab === "create" && createScreen === "play");
   document.body.classList.toggle("create-defense", appTab === "create" && createScreen === "defense");
   document.body.classList.toggle("scenario-editing", appTab === "run" && scenarioEditing);
   document.querySelector("#runToolbar").classList.toggle("hidden", appTab !== "run");
+  document.querySelector("#testToolbar").classList.toggle("hidden", appTab !== "test");
   els.field.classList.toggle(
     "move-mode",
     (appTab === "create" && boardMode === "move")
@@ -3250,7 +3383,13 @@ function render() {
   }[createScreen];
   els.leftPanelEyebrow.textContent = screenCopy[0];
   els.leftPanelTitle.textContent = screenCopy[1];
-  els.fieldNote.textContent = appTab === "run"
+  els.fieldNote.textContent = appTab === "test"
+    ? (!testRoundReady
+        ? "Start a random test to load a hidden play and defense."
+        : testAnswerRevealed
+          ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
+          : "The offensive play is shown. Diagnose the defensive shell and identify what comes open.")
+    : appTab === "run"
     ? (activeRunRouteOptions().length
         ? `Active options: ${activeRunRouteOptions().map(item =>
             `${item.player} runs ${item.option.name}`
@@ -3269,6 +3408,7 @@ function render() {
   renderNotes();
   renderReads();
   renderRunControls();
+  renderTestControls();
   renderPlaybookLibrary();
 }
 
@@ -4060,9 +4200,11 @@ function previewMovement(scope) {
   animationState = { offense: {}, defense: {} };
   const startedAt = performance.now();
   const baseSpeed = 115;
-  const playbackScale = scope === "run" ? runSpeed : 1;
-  const animateOffense = scope === "run" || scope === "play";
-  const animateDefense = scope === "defense" || (scope === "run" && runDefenseMovement);
+  const playbackScale = scope === "run" || scope === "test" ? runSpeed : 1;
+  const animateOffense = scope === "run" || scope === "test" || scope === "play";
+  const animateDefense = scope === "defense"
+    || (scope === "run" && runDefenseMovement)
+    || scope === "test";
   const offenseEntries = scope === "play"
     ? skillPositions.map(position => [position.id, editorOffensePositions()[position.id]])
     : Object.entries(editorOffensePositions());
@@ -4081,7 +4223,9 @@ function previewMovement(scope) {
     ? Object.entries(defenderStarts).map(([id, start]) => ({
         id,
         start,
-        route: scope === "run" ? runScenarioRoute("defense", id) : (currentDefense().routes[id] || []),
+        route: scope === "run" || scope === "test"
+          ? runScenarioRoute("defense", id)
+          : (currentDefense().routes[id] || []),
         manTarget: currentManAssignments()[id],
         zoneAssignment: currentZoneAssignments()[id],
         manState: {
@@ -4203,10 +4347,12 @@ function updatePlaybackUi() {
   els.fieldCard?.classList.toggle("playback-paused", paused);
   const runButton = document.querySelector("#runPlayButton");
   if (runButton) runButton.textContent = paused ? "Resume" : "Play";
+  const testButton = document.querySelector("#runTestButton");
+  if (testButton) testButton.textContent = paused ? "Resume Test" : "Run Test";
 }
 
 function toggleRunPlayback() {
-  if (appTab !== "run" || !animationPlayback) return false;
+  if (!isRunLikeMode() || !animationPlayback) return false;
   if (animationPlayback.paused) {
     const resumedAt = performance.now();
     animationPlayback.pausedDuration += resumedAt - animationPlayback.pauseStartedAt;
@@ -4224,7 +4370,7 @@ function toggleRunPlayback() {
 }
 
 els.field.addEventListener("click", event => {
-  if (!animationPlayback || appTab !== "run") return;
+  if (!animationPlayback || !isRunLikeMode()) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   toggleRunPlayback();
@@ -4236,6 +4382,64 @@ document.querySelector("#runPlayButton").addEventListener("click", () => {
     return;
   }
   previewMovement("run");
+});
+
+els.testSourceSelect.addEventListener("change", event => {
+  testSourceId = event.target.value;
+  testRoundReady = false;
+  testAnswerRevealed = false;
+  stopAnimationPlayback();
+  render();
+});
+
+els.testSpeedSelect.addEventListener("change", event => {
+  runSpeed = Number(event.target.value) || 1;
+  resetAnimation();
+});
+
+els.testDefenseOptions.addEventListener("change", event => {
+  if (!event.target.matches('input[type="checkbox"]')) return;
+  if (event.target.checked) {
+    testDefenseIds.add(event.target.value);
+  } else {
+    testDefenseIds.delete(event.target.value);
+  }
+  renderTestControls();
+});
+
+document.querySelector("#selectAllTestDefenses").addEventListener("click", () => {
+  testDefenseIds = new Set(defenses.map(defense => defense.id));
+  renderTestControls();
+});
+
+document.querySelector("#clearTestDefenses").addEventListener("click", () => {
+  testDefenseIds.clear();
+  renderTestControls();
+});
+
+document.querySelector("#newTestRoundButton").addEventListener("click", startRandomTestRound);
+
+document.querySelector("#runTestButton").addEventListener("click", () => {
+  if (!testRoundReady) return;
+  if (animationPlayback?.paused) {
+    toggleRunPlayback();
+    return;
+  }
+  testAnswerRevealed = false;
+  render();
+  previewMovement("test");
+});
+
+document.querySelector("#resetTestButton").addEventListener("click", () => {
+  if (!testRoundReady) return;
+  resetAnimation();
+});
+
+document.querySelector("#revealTestButton").addEventListener("click", () => {
+  if (!testRoundReady) return;
+  stopAnimationPlayback();
+  testAnswerRevealed = !testAnswerRevealed;
+  render();
 });
 
 document.querySelector("#previewMovementButton").addEventListener("click", () => {
@@ -4552,6 +4756,7 @@ document.querySelector("#scenarioResetButton").addEventListener("click", () => {
 
 document.querySelectorAll("[data-app-tab]").forEach(button => {
   button.addEventListener("click", () => {
+    stopAnimationPlayback();
     appTab = button.dataset.appTab;
     if (appTab === "create" && createScreen === "play") {
       if (!draftPlay) {
@@ -4568,8 +4773,8 @@ document.querySelectorAll("[data-app-tab]").forEach(button => {
       boardMode = "draw";
     }
     if (appTab === "run") resetRunScenario();
+    if (appTab === "test" && testRoundReady) resetRunScenario();
     if (appTab !== "run") scenarioEditing = false;
-    stopAnimationPlayback();
     syncTabButtons();
     render();
   });

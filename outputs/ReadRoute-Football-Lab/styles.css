@@ -1116,6 +1116,97 @@ input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rg
   background: #fffdf7;
 }
 .run-toolbar .field-label { margin-top: 0; }
+.test-toolbar {
+  margin-bottom: 12px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(90px, .3fr) minmax(190px, .8fr) repeat(4, auto);
+  gap: 12px;
+  align-items: end;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fffdf7;
+}
+.test-toolbar .field-label { margin-top: 0; }
+.test-defense-picker { position: relative; }
+.test-defense-picker details {
+  position: relative;
+  border: 1px solid #c8cebd;
+  border-radius: 6px;
+  background: white;
+}
+.test-defense-picker summary {
+  min-height: 38px;
+  padding: 10px 32px 9px 11px;
+  position: relative;
+  cursor: pointer;
+  list-style: none;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 800;
+}
+.test-defense-picker summary::-webkit-details-marker { display: none; }
+.test-defense-picker summary::after {
+  content: "+";
+  position: absolute;
+  right: 11px;
+  font-weight: 900;
+}
+.test-defense-picker details[open] summary::after { content: "-"; }
+.test-defense-menu {
+  width: max(100%, 240px);
+  max-height: 280px;
+  padding: 10px;
+  position: absolute;
+  top: calc(100% + 5px);
+  left: 0;
+  z-index: 20;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fffdf7;
+  box-shadow: 0 12px 28px rgba(9,27,20,.2);
+}
+.test-defense-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.test-defense-actions button {
+  padding: 5px 8px;
+  border: 1px solid #c8cebd;
+  border-radius: 5px;
+  color: var(--green-dark);
+  background: white;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.test-defense-options { display: grid; gap: 4px; }
+.test-defense-option {
+  padding: 6px 7px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  border-radius: 5px;
+  color: var(--green-dark);
+  font-size: 11px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.test-defense-option:hover { background: #eef4dc; }
+.test-defense-option input { accent-color: var(--green); }
+.test-status {
+  grid-column: 1 / -1;
+  min-height: 22px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--lime);
+  color: var(--green-dark);
+  background: #f4f7e9;
+  font-size: 12px;
+  font-weight: 800;
+}
 .run-play-browser {
   grid-column: 1 / -1;
   border: 1px solid #d8ddcc;
@@ -1662,16 +1753,26 @@ body.run-view .play-panel,
 body.run-view .defense-panel,
 body.run-view .route-toolbar,
 body.run-view .learning-strip,
-body.run-view #newPlayButton {
+body.run-view #newPlayButton,
+body.test-view .play-panel,
+body.test-view .defense-panel,
+body.test-view .route-toolbar,
+body.test-view .learning-strip,
+body.test-view #newPlayButton {
   display: none;
 }
-body.run-view .create-subnav { display: none; }
-body.run-view .workspace {
+body.run-view .create-subnav,
+body.test-view .create-subnav { display: none; }
+body.run-view .workspace,
+body.test-view .workspace {
   grid-template-columns: minmax(600px, 1050px);
   justify-content: center;
 }
-body.run-view .field-section { width: 100%; }
-body.run-view #field { cursor: default; }
+body.run-view .field-section,
+body.test-view .field-section { width: 100%; }
+body.run-view #field,
+body.test-view #field { cursor: default; }
+body.test-view .legend { display: none; }
 body.run-view.scenario-editing #field { cursor: crosshair; }
 body.run-view.scenario-editing .movable-player { cursor: pointer; }
 body.run-view.scenario-editing .move-mode .movable-player,
@@ -1781,7 +1882,9 @@ body.create-defense #newPlayButton {
   .legend { display: none; }
   .route-toolbar { flex-wrap: wrap; }
   .route-help { width: 100%; order: 4; flex-basis: 100%; }
-  .run-toolbar { grid-template-columns: 1fr 1fr; }
+  .run-toolbar,
+  .test-toolbar { grid-template-columns: 1fr 1fr; }
+  .test-status { grid-column: 1 / -1; }
   .run-play-browser-content { grid-template-columns: 1fr; }
   .create-subnav { padding: 12px 12px 0; overflow-x: auto; justify-content: start; }
   .create-subtab { min-width: 135px; padding: 9px 10px; font-size: 11px; }

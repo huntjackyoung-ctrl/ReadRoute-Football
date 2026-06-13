@@ -19,6 +19,7 @@
     <nav class="mode-tabs" aria-label="Workspace">
       <button class="mode-tab active" data-app-tab="create">Create</button>
       <button class="mode-tab" data-app-tab="run">Run Plays</button>
+      <button class="mode-tab" data-app-tab="test">Test</button>
       <button class="mode-tab" data-app-tab="playbook">Playbook</button>
     </nav>
     <div class="cloud-sync">
@@ -218,6 +219,41 @@
             <button id="scenarioResetButton" class="route-tool-button danger scenario-edit-only">Reset Scenario</button>
             <span id="scenarioStatus" class="scenario-status scenario-edit-only"></span>
           </div>
+        </div>
+
+        <div id="testToolbar" class="test-toolbar hidden">
+          <div>
+            <label class="field-label" for="testSourceSelect">Test plays from</label>
+            <select id="testSourceSelect"></select>
+          </div>
+          <div>
+            <label class="field-label" for="testSpeedSelect">Speed</label>
+            <select id="testSpeedSelect">
+              <option value="1">100%</option>
+              <option value=".75">75%</option>
+              <option value=".5">50%</option>
+              <option value=".25">25%</option>
+              <option value=".1">10%</option>
+            </select>
+          </div>
+          <div class="test-defense-picker">
+            <label class="field-label">Random defenses</label>
+            <details id="testDefensePicker">
+              <summary id="testDefenseSummary">All defenses</summary>
+              <div class="test-defense-menu">
+                <div class="test-defense-actions">
+                  <button id="selectAllTestDefenses" type="button">Select all</button>
+                  <button id="clearTestDefenses" type="button">Clear</button>
+                </div>
+                <div id="testDefenseOptions" class="test-defense-options"></div>
+              </div>
+            </details>
+          </div>
+          <button id="newTestRoundButton" class="button button-dark">New Random Test</button>
+          <button id="runTestButton" class="button button-primary">Run Test</button>
+          <button id="resetTestButton" class="route-tool-button">Reset</button>
+          <button id="revealTestButton" class="route-tool-button">Reveal Answer</button>
+          <span id="testStatus" class="test-status">Choose a source, then start a random test.</span>
         </div>
 
         <div class="field-card">
