@@ -1032,6 +1032,20 @@ function setItemFolderMembership(key, folderId, included) {
   else delete libraryAssignments[key];
 }
 
+function updateFormationPickerState(input) {
+  const group = input.closest(".folder-formation-picker");
+  if (!group) return;
+  const playInputs = [...group.querySelectorAll("[data-folder-membership]")];
+  const selectedCount = playInputs.filter(playInput => playInput.checked).length;
+  const formationInput = group.querySelector("[data-folder-formation-membership]");
+  const count = group.querySelector("summary small");
+  if (formationInput) {
+    formationInput.checked = playInputs.length > 0 && selectedCount === playInputs.length;
+    formationInput.indeterminate = selectedCount > 0 && selectedCount < playInputs.length;
+  }
+  if (count) count.textContent = `${selectedCount}/${playInputs.length} selected`;
+}
+
 function customLibraryFileMarkup(item, folderId) {
   const key = libraryItemKey(item.type, item.id);
   const previewAttribute = item.type === "play"
@@ -1042,12 +1056,105 @@ function customLibraryFileMarkup(item, folderId) {
   const editAttribute = `data-edit-${item.type}="${item.id}"`;
   return `
     <div class="custom-library-file" draggable="${cloudAccessRole !== "viewer"}" data-drag-library-item="${key}">
-      <button class="library-file ${item.type === "defense" ? "defense-file" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
+      <button class="library-file ${item.type === "defense" ? "defense-file" : ""} ${libraryPreview.type === item.type && libraryPreview.id === item.id ? "active" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
         <span class="library-file-icon">${item.icon}</span>
         <span>${escapeHtml(item.name)}</span>
       </button>
       ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
       <button class="library-action-button danger" data-remove-folder-item="${key}" data-remove-from-folder="${folderId}">Remove</button>
+    </div>
+  `;
+}
+
+function folderPlayPickerMarkup(folderId) {
+  const formationGroups = formations.map(formation => {
+    const formationPlays = plays
+      .filter(play => play.formationId === formation.id)
+      .sort((a, b) => a.name.localeCompare(b.name));
+    const selectedCount = formationPlays.filter(play =>
+      itemFolderIds(libraryItemKey("play", play.id)).includes(folderId)
+    ).length;
+    const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
+    return `
+      <details class="folder-formation-picker">
+        <summary>
+          <input
+            type="checkbox"
+            data-folder-formation-membership="${folderId}"
+            data-membership-formation="${formation.id}"
+            ${allSelected ? "checked" : ""}
+            ${formationPlays.length ? "" : "disabled"}
+            aria-label="Add all plays from ${escapeHtml(formation.name)}"
+          >
+          <span>${escapeHtml(formation.name)}</span>
+          <small>${selectedCount}/${formationPlays.length} selected</small>
+        </summary>
+        <div class="folder-formation-play-list">
+          ${formationPlays.length
+            ? formationPlays.map(play => {
+                const key = libraryItemKey("play", play.id);
+                return `
+                  <label>
+                    <input
+                      type="checkbox"
+                      data-folder-membership="${folderId}"
+                      data-membership-item="${key}"
+                      ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
+                    >
+                    <span>${escapeHtml(play.name)}</span>
+                  </label>
+                `;
+              }).join("")
+            : `<p class="library-empty">No plays saved for this formation.</p>`}
+        </div>
+      </details>
+    `;
+  }).join("");
+
+  const otherItems = [
+    ...formations
+      .filter(formation =>
+        itemFolderIds(libraryItemKey("formation", formation.id)).includes(folderId)
+      )
+      .map(formation => ({
+        type: "formation",
+        id: formation.id,
+        name: `${formation.name} formation`,
+        icon: "F"
+      })),
+    ...defenses.map(defense => ({
+      type: "defense",
+      id: defense.id,
+      name: defense.name,
+      icon: "D"
+    }))
+  ];
+
+  return `
+    <div class="folder-membership-list">
+      <p class="folder-picker-heading">Plays by formation</p>
+      ${formationGroups || `<p class="library-empty">No formations saved yet.</p>`}
+      ${otherItems.length ? `
+        <details class="folder-other-files">
+          <summary>Defenses and standalone formations</summary>
+          <div class="folder-other-file-list">
+            ${otherItems.map(item => {
+              const key = libraryItemKey(item.type, item.id);
+              return `
+                <label>
+                  <input
+                    type="checkbox"
+                    data-folder-membership="${folderId}"
+                    data-membership-item="${key}"
+                    ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
+                  >
+                  <span>${item.icon} - ${escapeHtml(item.name)}</span>
+                </label>
+              `;
+            }).join("")}
+          </div>
+        </details>
+      ` : ""}
     </div>
   `;
 }
@@ -1076,18 +1183,8 @@ function customFolderMarkup(folder, depth = 0) {
         ${items.map(item => customLibraryFileMarkup(item, folder.id)).join("")}
         ${!children.length && !items.length ? `<p class="library-empty">This folder is empty.</p>` : ""}
         <details class="folder-membership-editor">
-          <summary>Add or remove files</summary>
-          <div class="folder-membership-list">
-            ${libraryItems().sort((a, b) => a.name.localeCompare(b.name)).map(item => {
-              const key = libraryItemKey(item.type, item.id);
-              return `
-                <label>
-                  <input type="checkbox" data-folder-membership="${folder.id}" data-membership-item="${key}" ${itemFolderIds(key).includes(folder.id) ? "checked" : ""}>
-                  <span>${item.icon} - ${escapeHtml(item.name)}</span>
-                </label>
-              `;
-            }).join("")}
-          </div>
+          <summary>Choose plays for this folder</summary>
+          ${folderPlayPickerMarkup(folder.id)}
         </details>
       </div>
     </details>
@@ -1132,7 +1229,7 @@ function renderPlaybookLibrary() {
           ${formationPlays.length
             ? formationPlays.map(play => `
               <div class="library-file-row">
-                <button class="library-file" data-library-play="${play.id}">
+                <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
                   <span class="library-file-icon">P</span>
                   <span>${escapeHtml(play.name)}</span>
                 </button>
@@ -1148,7 +1245,7 @@ function renderPlaybookLibrary() {
 
   const defenseFiles = defenses.map(defense => `
     <div class="library-file-row">
-      <button class="library-file defense-file" data-library-defense="${defense.id}">
+      <button class="library-file defense-file ${libraryPreview.type === "defense" && libraryPreview.id === defense.id ? "active" : ""}" data-library-defense="${defense.id}">
         <span class="library-file-icon">D</span>
         <span>${escapeHtml(defense.name)}</span>
       </button>
@@ -1213,6 +1310,10 @@ function renderPlaybookLibrary() {
     button.addEventListener("click", () => {
       libraryPreview = { type: "play", id: button.dataset.libraryPlay };
       renderPlaybookLibrary();
+      requestAnimationFrame(() => {
+        els.playbookLibrary.querySelector(".library-preview")
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
     });
   });
 
@@ -1220,6 +1321,10 @@ function renderPlaybookLibrary() {
     button.addEventListener("click", () => {
       libraryPreview = { type: "defense", id: button.dataset.libraryDefense };
       renderPlaybookLibrary();
+      requestAnimationFrame(() => {
+        els.playbookLibrary.querySelector(".library-preview")
+          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      });
     });
   });
 
@@ -1267,8 +1372,45 @@ function renderPlaybookLibrary() {
       );
       lastSavedSignature = "";
       persistPlaybook();
-      renderPlaybookLibrary();
+      updateFormationPickerState(input);
       showSaveSuccess("Folder membership updated");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-folder-formation-membership]").forEach(input => {
+    const formationPlays = plays.filter(
+      play => play.formationId === input.dataset.membershipFormation
+    );
+    const selectedCount = formationPlays.filter(play =>
+      itemFolderIds(libraryItemKey("play", play.id))
+        .includes(input.dataset.folderFormationMembership)
+    ).length;
+    input.indeterminate = selectedCount > 0 && selectedCount < formationPlays.length;
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", () => {
+      formationPlays.forEach(play => {
+        setItemFolderMembership(
+          libraryItemKey("play", play.id),
+          input.dataset.folderFormationMembership,
+          input.checked
+        );
+      });
+      const group = input.closest(".folder-formation-picker");
+      group?.querySelectorAll("[data-folder-membership]").forEach(playInput => {
+        playInput.checked = input.checked;
+      });
+      updateFormationPickerState(input);
+      lastSavedSignature = "";
+      persistPlaybook();
+      showSaveSuccess(
+        input.checked
+          ? "Formation plays added to folder"
+          : "Formation plays removed from folder"
+      );
+    });
+  });
+  els.playbookLibrary.querySelectorAll(".folder-membership-editor").forEach(editor => {
+    editor.addEventListener("toggle", () => {
+      if (!editor.open) renderPlaybookLibrary();
     });
   });
   els.playbookLibrary.querySelectorAll("[data-remove-folder-item]").forEach(button => {
@@ -1589,6 +1731,51 @@ function deleteSavedDefense(defenseId) {
   render();
 }
 
+function libraryFieldMarkingsMarkup() {
+  const pixelsPerYard = 900 / (160 / 3);
+  const pixelsPerFoot = 900 / 160;
+  const standard = fieldStandards[fieldStandard];
+  const hashLeft = standard.hashFromSidelineFeet * pixelsPerFoot;
+  const hashRight = 900 - hashLeft;
+  const numberLeft = standard.numberCenterFromSidelineFeet * pixelsPerFoot;
+  const numberRight = 900 - numberLeft;
+  const markings = [
+    `<line x1="2" y1="0" x2="2" y2="620" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`,
+    `<line x1="898" y1="0" x2="898" y2="620" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`
+  ];
+
+  for (let yard = -8; yard <= 32; yard += 1) {
+    const y = lineOfScrimmage - (yard * pixelsPerYard);
+    if (y < 0 || y > 620) continue;
+    const isFive = yard % 5 === 0;
+    markings.push(`
+      <line x1="${isFive ? 0 : 9}" y1="${y}" x2="${isFive ? 900 : 891}" y2="${y}" stroke="rgba(255,255,255,${isFive ? ".30" : ".11"})" stroke-width="${isFive ? 2 : 1}"></line>
+      <line x1="${hashLeft - (pixelsPerYard / 3)}" y1="${y}" x2="${hashLeft + (pixelsPerYard / 3)}" y2="${y}" stroke="rgba(255,255,255,.68)" stroke-width="2"></line>
+      <line x1="${hashRight - (pixelsPerYard / 3)}" y1="${y}" x2="${hashRight + (pixelsPerYard / 3)}" y2="${y}" stroke="rgba(255,255,255,.68)" stroke-width="2"></line>
+      <line x1="0" y1="${y}" x2="11" y2="${y}" stroke="rgba(255,255,255,.65)" stroke-width="2"></line>
+      <line x1="889" y1="${y}" x2="900" y2="${y}" stroke="rgba(255,255,255,.65)" stroke-width="2"></line>
+    `);
+  }
+
+  [
+    { yard: 0, value: "30" },
+    { yard: 10, value: "40" },
+    { yard: 20, value: "50" }
+  ].forEach(mark => {
+    const y = lineOfScrimmage - (mark.yard * pixelsPerYard);
+    markings.push(`
+      <text x="${numberLeft}" y="${y}" fill="rgba(255,255,255,.70)" font-family="Arial, sans-serif" font-size="34" font-weight="900" text-anchor="middle" dominant-baseline="central" transform="rotate(90 ${numberLeft} ${y})">${mark.value}</text>
+      <text x="${numberRight}" y="${y}" fill="rgba(255,255,255,.70)" font-family="Arial, sans-serif" font-size="34" font-weight="900" text-anchor="middle" dominant-baseline="central" transform="rotate(-90 ${numberRight} ${y})">${mark.value}</text>
+    `);
+  });
+
+  markings.push(`
+    <line x1="0" y1="${lineOfScrimmage}" x2="900" y2="${lineOfScrimmage}" stroke="#fff" stroke-width="4"></line>
+    <text x="18" y="${lineOfScrimmage - 10}" fill="rgba(255,255,255,.76)" font-size="10" font-weight="800">LINE OF SCRIMMAGE</text>
+  `);
+  return markings.join("");
+}
+
 function libraryPreviewMarkup() {
   const isDefense = libraryPreview.type === "defense";
   const item = isDefense
@@ -1681,7 +1868,16 @@ function libraryPreviewMarkup() {
     : [...(formation.notes || []), ...(item.notes || [])];
   const notesMarkup = notes.map(note => {
     const dimensions = noteDimensions(note.text);
-    return `<g transform="translate(${note.x} ${note.y})"><rect width="${dimensions.width}" height="${dimensions.height}" rx="5" fill="rgba(255,253,247,.94)" stroke="#c9f45c" stroke-width="2"></rect><text x="10" y="24" fill="#10231c" font-size="12" font-weight="800">${escapeHtml(note.text || "")}</text></g>`;
+    const x = Math.max(6, Math.min(note.x, 894 - dimensions.width));
+    const y = Math.max(6, Math.min(note.y, 614 - dimensions.height));
+    return `
+      <g transform="translate(${x} ${y})">
+        <rect width="${dimensions.width}" height="${dimensions.height}" rx="5" fill="rgba(255,253,247,.96)" stroke="#c9f45c" stroke-width="2"></rect>
+        <foreignObject x="5" y="5" width="${Math.max(1, dimensions.width - 10)}" height="${Math.max(1, dimensions.height - 10)}">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="library-preview-note">${escapeHtml(note.text || "")}</div>
+        </foreignObject>
+      </g>
+    `;
   }).join("");
   const routeOptionSummary = isDefense ? "" : skillPositions.flatMap(position =>
     routeOptionsFor(item, position.id).map(option => {
@@ -1694,9 +1890,13 @@ function libraryPreviewMarkup() {
 
   return `
     <div class="library-preview-heading">
-      <p class="eyebrow">${isDefense ? "Defense preview" : escapeHtml(formation.name)}</p>
-      <h3>${escapeHtml(item.name)}</h3>
+      <div>
+        <p class="eyebrow">${isDefense ? "Defense preview" : escapeHtml(formation.name)}</p>
+        <h3>${escapeHtml(item.name)}</h3>
+      </div>
+      <span class="library-field-standard">${escapeHtml(fieldStandards[fieldStandard].label)} field</span>
     </div>
+    <div class="library-field-frame">
     <svg viewBox="0 0 900 620" aria-label="${escapeHtml(item.name)} preview">
       <defs>
         <marker id="libraryArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#f2c35a"></path></marker>
@@ -1705,9 +1905,10 @@ function libraryPreviewMarkup() {
         <marker id="libraryOptionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#c9f45c"></path></marker>
       </defs>
       <rect width="900" height="620" rx="10" fill="#174c35"></rect>
-      <line x1="0" y1="476" x2="900" y2="476" stroke="#fff" stroke-width="4"></line>
+      ${libraryFieldMarkingsMarkup()}
       ${routeMarkup}${optionRouteMarkup}${offenseMarkup}${defenseMarkup}${notesMarkup}
     </svg>
+    </div>
     ${routeOptionSummary
       ? `<div class="route-option-summary"><p class="eyebrow">Route options</p>${routeOptionSummary}</div>`
       : ""}
