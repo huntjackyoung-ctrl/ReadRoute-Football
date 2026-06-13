@@ -3126,6 +3126,7 @@ function defender(x, y, label = "") {
     assignment.className = "defense-assignment-label";
     assignment.textContent = manTarget
       ? `Man: ${offenseLabel(manTarget)}`
+      : zoneAssignment && route.length ? "Custom movement + reactive zone"
       : zoneAssignment ? "Reactive zone"
       : route.length ? "Custom path" : "No movement";
     row.append(assignment);
@@ -3454,8 +3455,8 @@ function render() {
   els.defensePathHelp.textContent = defenseAssignmentMode === "man"
     ? "Click a defender, then click the receiver or back they guard."
     : defenseAssignmentMode === "zone"
-      ? "Select a defender, then click the center of their zone. They will react to receivers entering it."
-      : "Select a defender, then draw their custom movement path.";
+      ? "Place the defender's zone. Any custom movement already drawn will run first at the snap."
+      : "Draw the defender's snap movement. You can also assign a zone that takes over when the movement ends.";
   els.boardModeStatus.textContent = boardMode === "move"
     ? "Moving players"
     : createScreen === "defense" && defenseAssignmentMode === "man"
@@ -3473,8 +3474,8 @@ function render() {
       ? "Click a defender, then click the receiver or back they guard."
     : createScreen === "defense" && defenseAssignmentMode === "zone"
       ? currentDefense().zoneAssignments?.[activeRouteId]
-        ? "Drag the zone to move it. Pull its top, bottom, left, or right point to reshape it."
-        : "Click the field to place the selected defender's reactive zone."
+        ? "Drag or reshape the zone. A saved custom movement path will run before the defender reacts to it."
+        : "Click the field to place the reactive zone. The defender's custom movement can remain in place."
     : createScreen === "play" && playPathType === "motion"
       ? "Click the field to draw pre-snap motion. The route will begin where the motion ends."
     : createScreen === "play" && selectedRouteOptionId !== "base"
@@ -3522,7 +3523,7 @@ function render() {
     : {
         formation: "Move players into position, edit receiver labels, name the formation, and save it.",
         play: "Choose a saved formation, select a receiver, and draw the named play.",
-        defense: "Position defenders, then give each one a custom path, man assignment, or no movement."
+        defense: "Position defenders, then combine snap movement with zone coverage or assign man coverage."
       }[createScreen];
   document.querySelectorAll(".board-mode-button").forEach(button => {
     button.classList.toggle("active", button.dataset.boardMode === boardMode);
@@ -3742,7 +3743,6 @@ els.field.addEventListener("click", event => {
   if (appTab === "run" && scenarioEditing && scenarioTool === "zone"
     && activeRouteSide === "defense") {
     delete currentManAssignments()[activeRouteId];
-    runScenario.defenseRoutes[activeRouteId] = [];
     const point = eventToFieldPoint(event);
     const existingZone = currentZoneAssignments()[activeRouteId];
     const radii = zoneRadii(existingZone);
@@ -3759,7 +3759,6 @@ els.field.addEventListener("click", event => {
   if (appTab === "run" && scenarioEditing && scenarioTool === "draw") {
     if (activeRouteSide === "defense") {
       delete currentManAssignments()[activeRouteId];
-      delete currentZoneAssignments()[activeRouteId];
     }
     const route = runScenarioRoute(activeRouteSide, activeRouteId);
     if (activeRouteSide === "offense") {
@@ -3841,7 +3840,6 @@ els.field.addEventListener("click", event => {
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "zone") {
     delete currentDefense().manAssignments[activeRouteId];
-    currentDefense().routes[activeRouteId] = [];
     const point = eventToFieldPoint(event);
     const existingZone = currentDefense().zoneAssignments[activeRouteId];
     const radii = zoneRadii(existingZone);
@@ -3855,7 +3853,6 @@ els.field.addEventListener("click", event => {
   } else if (createScreen === "defense" && activeRouteSide === "defense"
     && defenseAssignmentMode === "path") {
     delete currentDefense().manAssignments[activeRouteId];
-    delete currentDefense().zoneAssignments[activeRouteId];
     currentDefense().routes[activeRouteId] ||= [];
     const route = currentDefense().routes[activeRouteId];
     const anchor = route[route.length - 1] || currentDefense().positions[activeRouteId];
@@ -4208,10 +4205,14 @@ function clampToZone(point, zone) {
 }
 
 function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeepHelp = false) {
+  const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
   const isDeepSafety = state.start.y < lineOfScrimmage - 190;
   const reactionTime = isDeepSafety ? .42 : .24;
   const radii = zoneRadii(zone);
-  const deepThreatLine = Math.min(state.start.y + 25, zone.y + (radii.y * .2));
+  const deepThreatLine = Math.max(
+    state.start.y,
+    Math.min(state.start.y + 25, zone.y + (radii.y * .2))
+  );
   const threats = receivers
     .map(receiver => ({
       ...receiver,
@@ -4279,15 +4280,22 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
   const acceleration = carryingDeepThreat ? 720 : isDeepSafety ? 360 : 430;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
-  const maxVelocityChange = acceleration * deltaSeconds;
+  const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
     ? Math.min(1, maxVelocityChange / velocityChange)
     : 0;
 
   state.vx += (desiredVx - state.vx) * velocityRatio;
   state.vy += (desiredVy - state.vy) * velocityRatio;
-  state.x += state.vx * deltaSeconds;
-  state.y += state.vy * deltaSeconds;
+  const proposedDx = state.vx * safeDelta;
+  const proposedDy = state.vy * safeDelta;
+  const proposedDistance = Math.hypot(proposedDx, proposedDy);
+  const maxFrameDistance = maxSpeed * safeDelta;
+  const frameRatio = proposedDistance
+    ? Math.min(1, maxFrameDistance / proposedDistance)
+    : 0;
+  state.x += proposedDx * frameRatio;
+  state.y += proposedDy * frameRatio;
   if (isDeepSafety && state.y > deepThreatLine) {
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
@@ -4344,34 +4352,50 @@ function previewMovement(scope) {
       }))
     : [];
   const defensePaths = animateDefense
-    ? Object.entries(defenderStarts).map(([id, start]) => ({
-        id,
-        start,
-        route: scope === "run" || scope === "test"
+    ? Object.entries(defenderStarts).map(([id, start]) => {
+        const route = scope === "run" || scope === "test"
           ? runScenarioRoute("defense", id)
-          : (currentDefense().routes[id] || []),
-        manTarget: currentManAssignments()[id],
-        zoneAssignment: currentZoneAssignments()[id],
-        manState: {
-          x: start.x,
-          y: start.y,
-          vx: 0,
-          vy: 0,
-          lastReceiver: {
-            ...(editorOffensePositions()[currentManAssignments()[id]] || start)
+          : (currentDefense().routes[id] || []);
+        const manTarget = currentManAssignments()[id];
+        const zoneAssignment = currentZoneAssignments()[id];
+        const routeDuration = pathDuration(start, route, baseSpeed);
+        const zoneStart = route.length
+          ? { ...route[route.length - 1] }
+          : { ...start };
+        return {
+          id,
+          start,
+          route,
+          routeDuration,
+          manTarget,
+          zoneAssignment,
+          manState: {
+            x: start.x,
+            y: start.y,
+            vx: 0,
+            vy: 0,
+            lastReceiver: {
+              ...(editorOffensePositions()[currentManAssignments()[id]] || start)
+            },
+            lastDirection: { x: 0, y: -1 },
+            leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1
           },
-          lastDirection: { x: 0, y: -1 },
-          leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1
-        },
-        zoneState: {
-          x: start.x,
-          y: start.y,
-          vx: 0,
-          vy: 0,
-          start: { ...start }
-        }
-      }))
+          zoneState: {
+            x: zoneStart.x,
+            y: zoneStart.y,
+            vx: 0,
+            vy: 0,
+            start: zoneStart
+          }
+        };
+      })
     : [];
+  offensePaths.forEach(({ id, start }) => {
+    animationState.offense[id] = { ...start };
+  });
+  defensePaths.forEach(({ id, start }) => {
+    animationState.defense[id] = { ...start };
+  });
   const maxMotionDuration = Math.max(
     0,
     ...offensePaths.map(path => pathDuration(path.start, path.motion, baseSpeed))
@@ -4379,7 +4403,9 @@ function previewMovement(scope) {
   const maxPostSnapDuration = Math.max(
     0,
     ...offensePaths.map(path => pathDuration(path.snapStart, path.route, baseSpeed)),
-    ...defensePaths.map(path => pathDuration(path.start, path.route, baseSpeed))
+    ...defensePaths.map(path =>
+      path.routeDuration + (path.zoneAssignment && !path.manTarget ? 3 : 0)
+    )
   );
   const totalDuration = maxMotionDuration + maxPostSnapDuration;
   animationPlayback = {
@@ -4411,7 +4437,17 @@ function previewMovement(scope) {
       });
     }
     if (animateDefense) {
-      defensePaths.forEach(({ id, start, route, manTarget, zoneAssignment, manState, zoneState }) => {
+      defensePaths.forEach(({
+        id,
+        start,
+        route,
+        routeDuration,
+        manTarget,
+        zoneAssignment,
+        manState,
+        zoneState
+      }) => {
+        const postSnapElapsed = elapsed - maxMotionDuration;
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = animationState.offense[manTarget] || targetStart;
@@ -4421,7 +4457,16 @@ function previewMovement(scope) {
             elapsed,
             deltaSeconds
           );
-        } else if (zoneAssignment && elapsed >= maxMotionDuration) {
+        } else if (zoneAssignment && postSnapElapsed >= 0) {
+          if (route.length && postSnapElapsed < routeDuration) {
+            animationState.defense[id] = interpolateTimedPath(
+              start,
+              route,
+              postSnapElapsed,
+              baseSpeed
+            );
+            return;
+          }
           const receivers = skillPositions.map(position => ({
             id: position.id,
             ...(animationState.offense[position.id] || editorOffensePositions()[position.id])
@@ -4429,7 +4474,7 @@ function previewMovement(scope) {
           const hasDeepHelp = defensePaths.some(other =>
             other.id !== id
             && other.zoneAssignment
-            && other.start.y < start.y - 40
+            && other.zoneState.start.y < zoneState.start.y - 40
             && Math.abs(other.zoneAssignment.x - zoneAssignment.x)
               <= (zoneRadii(other.zoneAssignment).x + zoneRadii(zoneAssignment).x)
           );
@@ -4437,15 +4482,15 @@ function previewMovement(scope) {
             zoneState,
             zoneAssignment,
             receivers,
-            elapsed - maxMotionDuration,
+            Math.max(0, postSnapElapsed - routeDuration),
             deltaSeconds,
             hasDeepHelp
           );
-        } else if (elapsed >= maxMotionDuration) {
+        } else if (postSnapElapsed >= 0) {
           animationState.defense[id] = interpolateTimedPath(
             start,
             route,
-            elapsed - maxMotionDuration,
+            postSnapElapsed,
             baseSpeed
           );
         }
