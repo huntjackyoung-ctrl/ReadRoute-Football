@@ -28,11 +28,17 @@ const copyInviteButton = document.querySelector("#copyWorkspaceInviteButton");
 const memberList = document.querySelector("#workspaceMemberList");
 const config = window.READROUTE_FIREBASE_CONFIG;
 const workspaceStorageKey = "readroute-active-workspace";
+const cloudClientStorageKey = "readroute-cloud-client";
+const cloudClientId = sessionStorage.getItem(cloudClientStorageKey) || crypto.randomUUID();
+sessionStorage.setItem(cloudClientStorageKey, cloudClientId);
 let activeUser = null;
 let activeWorkspaceId = null;
 let activeRole = null;
 let applyingRemote = false;
 let uploadTimer = null;
+let lastUploadedAt = "";
+let pendingRemoteSnapshot = null;
+let waitingForNoteBlur = false;
 let stopRemoteListener = null;
 let stopMemberListener = null;
 
@@ -59,6 +65,10 @@ function personalWorkspaceId(uid) {
   return `personal-${uid}`;
 }
 
+function noteEditorIsActive() {
+  return document.activeElement?.matches?.(".note-editor textarea");
+}
+
 if (!config?.apiKey || !config?.databaseURL) {
   setStatus("Cloud setup required");
   signInButton?.addEventListener("click", () => {
@@ -70,13 +80,37 @@ if (!config?.apiKey || !config?.databaseURL) {
   const database = getDatabase(firebaseApp);
   const provider = new GoogleAuthProvider();
 
+  function applyRemoteSnapshot(remote, message = `${activeRole} workspace updated`) {
+    applyingRemote = true;
+    try {
+      window.ReadRouteCloud?.applySnapshot(remote);
+      setStatus(message);
+    } finally {
+      applyingRemote = false;
+    }
+  }
+
+  function applyPendingRemoteAfterNote() {
+    if (waitingForNoteBlur || !noteEditorIsActive() || !pendingRemoteSnapshot) return;
+    waitingForNoteBlur = true;
+    document.activeElement.addEventListener("blur", () => {
+      waitingForNoteBlur = false;
+      const remote = pendingRemoteSnapshot;
+      pendingRemoteSnapshot = null;
+      if (remote) applyRemoteSnapshot(remote);
+    }, { once: true });
+    setStatus("Workspace update waiting until note editing is finished");
+  }
+
   async function uploadSnapshot(snapshot = window.ReadRouteCloud?.getSnapshot()) {
     if (!activeUser || !activeWorkspaceId || activeRole === "viewer"
       || applyingRemote || !snapshot) return;
     setStatus("Saving shared workspace...");
+    lastUploadedAt = new Date().toISOString();
     await set(ref(database, `workspaces/${activeWorkspaceId}/playbook`), {
       ...snapshot,
-      cloudUpdatedAt: new Date().toISOString()
+      cloudUpdatedAt: lastUploadedAt,
+      cloudClientId
     });
     setStatus(`${activeRole === "owner" ? "Owner" : "Editor"} workspace saved`);
   }
@@ -178,23 +212,20 @@ if (!config?.apiKey || !config?.databaseURL) {
             await uploadSnapshot();
             return;
           }
-          applyingRemote = true;
-          try {
-            window.ReadRouteCloud?.applySnapshot(remote);
-            setStatus(`${activeRole} workspace loaded`);
-          } finally {
-            applyingRemote = false;
-          }
+          applyRemoteSnapshot(remote, `${activeRole} workspace loaded`);
           return;
         }
         if (!remote) return;
-        applyingRemote = true;
-        try {
-          window.ReadRouteCloud?.applySnapshot(remote);
-          setStatus(`${activeRole} workspace updated`);
-        } finally {
-          applyingRemote = false;
+        if (remote.cloudClientId === cloudClientId
+          && remote.cloudUpdatedAt === lastUploadedAt) {
+          return;
         }
+        if (noteEditorIsActive()) {
+          pendingRemoteSnapshot = remote;
+          applyPendingRemoteAfterNote();
+          return;
+        }
+        applyRemoteSnapshot(remote);
       },
       error => {
         console.error("Workspace sync failed", error);

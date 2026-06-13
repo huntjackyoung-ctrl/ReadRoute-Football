@@ -1364,7 +1364,9 @@ function renameLibraryFolder(folderId) {
 
 function deleteLibraryFolder(folderId) {
   const folder = libraryFolders.find(candidate => candidate.id === folderId);
-  if (!folder || !window.confirm(`Delete folder "${folder.name}"? Its contents will move up one level.`)) return;
+  if (!folder || !window.confirm(
+    `Delete folder "${folder.name}" only? No plays, formations, or defenses will be deleted.`
+  )) return;
   const destinationId = folder.parentId || null;
   libraryFolders.forEach(candidate => {
     if (candidate.parentId === folderId) candidate.parentId = destinationId;
@@ -1373,16 +1375,14 @@ function deleteLibraryFolder(folderId) {
     const currentMemberships = itemFolderIds(key);
     if (!currentMemberships.includes(folderId)) return;
     const memberships = currentMemberships.filter(id => id !== folderId);
-    if (destinationId) memberships.push(destinationId);
-    const uniqueMemberships = [...new Set(memberships)];
-    if (uniqueMemberships.length) libraryAssignments[key] = uniqueMemberships;
+    if (memberships.length) libraryAssignments[key] = memberships;
     else delete libraryAssignments[key];
   });
   libraryFolders = libraryFolders.filter(candidate => candidate.id !== folderId);
   lastSavedSignature = "";
   persistPlaybook();
   renderPlaybookLibrary();
-  showSaveSuccess("Folder deleted; contents moved up");
+  showSaveSuccess("Folder deleted. No plays were deleted");
 }
 
 function exportPlaybook() {
@@ -2622,7 +2622,7 @@ function renderNotes() {
       const moveButton = document.createElementNS("http://www.w3.org/1999/xhtml", "button");
       moveButton.type = "button";
       moveButton.className = "note-move-button";
-      moveButton.textContent = "↕";
+      moveButton.textContent = "::";
       moveButton.title = "Drag note";
       moveButton.setAttribute("aria-label", "Drag note");
       moveButton.addEventListener("pointerdown", event => {
