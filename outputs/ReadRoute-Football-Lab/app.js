@@ -124,6 +124,7 @@ let scenarioEditing = false;
 let scenarioTool = "move";
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
+const libraryFolderOpenState = new Map();
 let saveToastTimer = null;
 let autosaveTimer = null;
 let lastSavedSignature = "";
@@ -1046,8 +1047,28 @@ function updateFormationPickerState(input) {
   if (count) count.textContent = `${selectedCount}/${playInputs.length} selected`;
 }
 
+function rememberLibraryFolderState() {
+  els.playbookLibrary
+    ?.querySelectorAll("[data-library-folder-state]")
+    .forEach(folder => {
+      libraryFolderOpenState.set(folder.dataset.libraryFolderState, folder.open);
+    });
+}
+
+function libraryFolderOpenAttribute(key) {
+  return libraryFolderOpenState.get(key) === false ? "" : " open";
+}
+
 function customLibraryFileMarkup(item, folderId) {
   const key = libraryItemKey(item.type, item.id);
+  const formationName = item.type === "play"
+    ? formations.find(formation =>
+        formation.id === plays.find(play => play.id === item.id)?.formationId
+      )?.name
+    : "";
+  const displayName = formationName
+    ? `${formationName} / ${item.name}`
+    : item.name;
   const previewAttribute = item.type === "play"
     ? `data-library-play="${item.id}"`
     : item.type === "defense"
@@ -1058,7 +1079,7 @@ function customLibraryFileMarkup(item, folderId) {
     <div class="custom-library-file" draggable="${cloudAccessRole !== "viewer"}" data-drag-library-item="${key}">
       <button class="library-file ${item.type === "defense" ? "defense-file" : ""} ${libraryPreview.type === item.type && libraryPreview.id === item.id ? "active" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
         <span class="library-file-icon">${item.icon}</span>
-        <span>${escapeHtml(item.name)}</span>
+        <span>${escapeHtml(displayName)}</span>
       </button>
       ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
       <button class="library-action-button danger" data-remove-folder-item="${key}" data-remove-from-folder="${folderId}">Remove</button>
@@ -1167,7 +1188,7 @@ function customFolderMarkup(folder, depth = 0) {
     .filter(item => itemFolderIds(libraryItemKey(item.type, item.id)).includes(folder.id))
     .sort((a, b) => a.name.localeCompare(b.name));
   return `
-    <details class="custom-library-folder" open style="--folder-depth:${depth}" data-folder-drop="${folder.id}">
+    <details class="custom-library-folder"${libraryFolderOpenAttribute(`custom:${folder.id}`)} style="--folder-depth:${depth}" data-folder-drop="${folder.id}" data-library-folder-state="custom:${folder.id}">
       <summary>
         <span class="library-folder-icon">F</span>
         <span>${escapeHtml(folder.name)}</span>
@@ -1212,10 +1233,11 @@ function customFolderBrowserMarkup() {
 }
 
 function renderPlaybookLibrary() {
+  rememberLibraryFolderState();
   const formationFolders = formations.map(formation => {
     const formationPlays = plays.filter(play => play.formationId === formation.id);
     return `
-      <details class="library-folder" open>
+      <details class="library-folder"${libraryFolderOpenAttribute(`formation:${formation.id}`)} data-library-folder-state="formation:${formation.id}">
         <summary>
           <span class="library-folder-icon">F</span>
           <span>${escapeHtml(formation.name)}</span>
@@ -1292,7 +1314,7 @@ function renderPlaybookLibrary() {
         </div>
         <div class="library-column">
           <p class="eyebrow">Defense</p>
-          <details class="library-folder defense-folder" open>
+          <details class="library-folder defense-folder"${libraryFolderOpenAttribute("defenses")} data-library-folder-state="defenses">
             <summary>
               <span class="library-folder-icon">D</span>
               <span>Defenses</span>
