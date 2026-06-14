@@ -4296,8 +4296,9 @@ function interpolateTimedPath(start, points, elapsedSeconds, baseSpeed = 115) {
 }
 
 function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
-  const reactionTime = 0.16;
-  if (elapsed < reactionTime || !deltaSeconds) {
+  const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
+  const reactionTime = 0.12;
+  if (elapsed < reactionTime || !safeDelta) {
     state.lastReceiver = { ...receiverPosition };
     return { x: state.x, y: state.y };
   }
@@ -4307,35 +4308,90 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const receiverStep = Math.hypot(receiverDx, receiverDy);
   const directionX = receiverStep ? receiverDx / receiverStep : state.lastDirection.x;
   const directionY = receiverStep ? receiverDy / receiverStep : state.lastDirection.y;
-  if (receiverStep) state.lastDirection = { x: directionX, y: directionY };
+  const receiverVx = receiverDx / safeDelta;
+  const receiverVy = receiverDy / safeDelta;
+  const previousDirection = state.lastDirection;
+  const receiverDepth = state.receiverStart.y - receiverPosition.y;
+  const receiverLateralTravel = Math.abs(receiverPosition.x - state.receiverStart.x);
+  const directionChange = Math.hypot(
+    directionX - previousDirection.x,
+    directionY - previousDirection.y
+  );
+  const verticalRelease = receiverVy < -18
+    || (directionY < -.38 && receiverDepth > 8);
+  const lateralBreak = Math.abs(receiverVx) > Math.max(34, Math.abs(receiverVy) * 1.2);
+  const downhillBreak = receiverVy > 18;
+  if (receiverDepth > 18 || verticalRelease) state.deepThreatened = true;
+  const routeBreak = elapsed > .2 && (
+    downhillBreak
+    || (state.deepThreatened && lateralBreak)
+    || (state.deepThreatened && directionChange > .85)
+    || (elapsed > .3 && receiverLateralTravel > 24 && lateralBreak)
+  );
+  if (routeBreak) state.breakConfirmed = true;
+  if (state.breakConfirmed) {
+    state.phase = "drive";
+  } else if (state.deepThreatened) {
+    state.phase = "carry";
+  } else {
+    state.phase = "mirror";
+  }
 
-  const trailDistance = 12;
-  const leverageDistance = 5;
-  const targetX = receiverPosition.x
-    - (directionX * trailDistance)
-    + (state.leverage * -directionY * leverageDistance);
-  const targetY = receiverPosition.y
-    - (directionY * trailDistance)
-    + (state.leverage * directionX * leverageDistance);
+  const cushion = receiverPosition.y - state.y;
+  let targetX = state.x;
+  let targetY = state.y;
+  let maxSpeed = 90;
+  let acceleration = 430;
+
+  if (state.phase === "mirror") {
+    // Hold depth and mirror the release until the receiver threatens vertically.
+    targetX = receiverPosition.x + state.horizontalLeverage;
+    targetY = state.start.y;
+    maxSpeed = 94;
+    acceleration = 470;
+  } else if (state.phase === "carry") {
+    // Open and carry from an over-the-top position instead of chasing the receiver's hip.
+    const desiredCushion = cushion < 22 ? 30 : cushion > 45 ? 38 : cushion;
+    targetX = receiverPosition.x + (state.horizontalLeverage * .55);
+    targetY = Math.min(state.start.y, receiverPosition.y - desiredCushion);
+    const receiverIsLevel = cushion < 10;
+    const cushionThreatened = cushion < 24;
+    maxSpeed = receiverIsLevel ? 154 : cushionThreatened ? 140 : 122;
+    acceleration = receiverIsLevel ? 940 : cushionThreatened ? 800 : 680;
+  } else {
+    // Once the receiver declares the break, plant and drive toward the near hip.
+    const trailDistance = state.deepThreatened ? 10 : 7;
+    targetX = receiverPosition.x - (directionX * trailDistance);
+    targetY = receiverPosition.y - (directionY * trailDistance);
+    const separationFromReceiver = Math.hypot(
+      receiverPosition.x - state.x,
+      receiverPosition.y - state.y
+    );
+    maxSpeed = separationFromReceiver > 55 ? 142 : separationFromReceiver > 30 ? 128 : 116;
+    acceleration = 820;
+  }
+
   const gapX = targetX - state.x;
   const gapY = targetY - state.y;
   const separation = Math.hypot(gapX, gapY);
-  const recoveryBoost = separation > 70 ? 1.34 : separation > 38 ? 1.20 : 1.08;
-  const maxSpeed = 115 * recoveryBoost;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
-  const acceleration = 620;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
-  const maxVelocityChange = acceleration * deltaSeconds;
+  const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
     ? Math.min(1, maxVelocityChange / velocityChange)
     : 0;
 
   state.vx += (desiredVx - state.vx) * velocityRatio;
   state.vy += (desiredVy - state.vy) * velocityRatio;
-  state.x += state.vx * deltaSeconds;
-  state.y += state.vy * deltaSeconds;
+  state.x += state.vx * safeDelta;
+  state.y += state.vy * safeDelta;
+  if (state.phase !== "drive" && state.y > state.start.y) {
+    state.y = state.start.y;
+    state.vy = Math.min(0, state.vy);
+  }
   state.lastReceiver = { ...receiverPosition };
+  if (receiverStep) state.lastDirection = { x: directionX, y: directionY };
   return { x: state.x, y: state.y };
 }
 
@@ -4504,6 +4560,7 @@ function previewMovement(scope) {
           ? runScenarioRoute("defense", id)
           : (currentDefense().routes[id] || []);
         const manTarget = currentManAssignments()[id];
+        const manTargetStart = editorOffensePositions()[manTarget] || start;
         const zoneAssignment = currentZoneAssignments()[id];
         const routeDuration = pathDuration(start, route, baseSpeed);
         const zoneStart = route.length
@@ -4522,8 +4579,15 @@ function previewMovement(scope) {
             vx: 0,
             vy: 0,
             postSnapStarted: false,
+            start: { ...start },
+            receiverStart: { ...manTargetStart },
+            initialCushion: Math.max(18, manTargetStart.y - start.y),
+            horizontalLeverage: start.x - manTargetStart.x,
+            phase: "mirror",
+            deepThreatened: false,
+            breakConfirmed: false,
             lastReceiver: {
-              ...(editorOffensePositions()[currentManAssignments()[id]] || start)
+              ...manTargetStart
             },
             lastDirection: { x: 0, y: -1 },
             leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1
@@ -4611,7 +4675,15 @@ function previewMovement(scope) {
             manState.y = start.y;
             manState.vx = 0;
             manState.vy = 0;
+            manState.start = { x: manState.x, y: manState.y };
+            manState.receiverStart = { ...targetPosition };
+            manState.initialCushion = Math.max(18, targetPosition.y - manState.y);
+            manState.horizontalLeverage = manState.x - targetPosition.x;
+            manState.phase = "mirror";
+            manState.deepThreatened = false;
+            manState.breakConfirmed = false;
             manState.lastReceiver = { ...targetPosition };
+            manState.lastDirection = { x: 0, y: -1 };
             manState.postSnapStarted = true;
           }
           animationState.defense[id] = moveManDefender(
