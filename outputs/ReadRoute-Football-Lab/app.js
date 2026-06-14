@@ -4521,6 +4521,7 @@ function previewMovement(scope) {
             y: start.y,
             vx: 0,
             vy: 0,
+            postSnapStarted: false,
             lastReceiver: {
               ...(editorOffensePositions()[currentManAssignments()[id]] || start)
             },
@@ -4598,10 +4599,25 @@ function previewMovement(scope) {
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = animationState.offense[manTarget] || targetStart;
+          if (postSnapElapsed < 0) {
+            animationState.defense[id] = {
+              x: start.x + (targetPosition.x - targetStart.x),
+              y: start.y
+            };
+            return;
+          }
+          if (!manState.postSnapStarted) {
+            manState.x = start.x + (targetPosition.x - targetStart.x);
+            manState.y = start.y;
+            manState.vx = 0;
+            manState.vy = 0;
+            manState.lastReceiver = { ...targetPosition };
+            manState.postSnapStarted = true;
+          }
           animationState.defense[id] = moveManDefender(
             manState,
             targetPosition,
-            elapsed,
+            postSnapElapsed,
             deltaSeconds
           );
         } else if (zoneAssignment && postSnapElapsed >= 0) {
