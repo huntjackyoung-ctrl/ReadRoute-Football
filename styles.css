@@ -192,6 +192,30 @@ body.workspace-viewer .import-playbook-button {
 .hidden { display: none !important; }
 .button-row { margin-top: 9px; display: flex; gap: 7px; }
 .button-row button:last-child { flex: 1; }
+.defense-alignment-controls {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid #d8ddcc;
+  border-radius: 7px;
+  background: #f8faef;
+}
+.defense-alignment-controls .field-label { margin-top: 8px; }
+.defense-alignment-progress {
+  margin: 8px 0;
+  color: var(--green-dark);
+  font-size: 10px;
+  font-weight: 850;
+}
+.defense-alignment-actions {
+  margin-top: 7px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+.defense-alignment-actions:last-child { grid-template-columns: 1fr 1fr; }
+.defense-alignment-actions button { padding-inline: 7px; }
+body.defense-alignment-mode .defense-path-card { opacity: .45; pointer-events: none; }
+body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 .save-play-button {
   color: var(--white);
   border-color: var(--green-dark);

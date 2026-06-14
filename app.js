@@ -92,6 +92,7 @@ function createBlankDefense(name = "Untitled Defense", labels = {}) {
     routes: {},
     manAssignments: {},
     zoneAssignments: {},
+    formationAlignments: {},
     labels: structuredClone(labels),
     notes: []
   };
@@ -124,6 +125,8 @@ let runDefenseMovement = true;
 let runScenario = null;
 let scenarioEditing = false;
 let scenarioTool = "move";
+let defenseAlignmentMode = false;
+let defenseAlignmentFormationId = selectedFormationId;
 let testSourceId = "all";
 let testPlayIds = new Set(plays.map(play => play.id));
 let testDefenseIds = new Set(defenses.map(defense => defense.id));
@@ -166,6 +169,9 @@ const els = {
   testStatus: document.querySelector("#testStatus"),
   defenseSelect: document.querySelector("#defenseSelect"),
   defenseName: document.querySelector("#defenseName"),
+  defenseAlignmentControls: document.querySelector("#defenseAlignmentControls"),
+  defenseAlignmentFormationSelect: document.querySelector("#defenseAlignmentFormationSelect"),
+  defenseAlignmentProgress: document.querySelector("#defenseAlignmentProgress"),
   defenseLabels: document.querySelector("#defenseLabels"),
   assignments: document.querySelector("#assignments"),
   coachCue: document.querySelector("#coachCue"),
@@ -321,30 +327,40 @@ function loadFormations() {
   return [formation];
 }
 
+function normalizeDefense(defense) {
+  return {
+    ...defense,
+    positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
+    routes: defense.routes || {},
+    manAssignments: defense.manAssignments || {},
+    zoneAssignments: Object.fromEntries(
+      Object.entries(defense.zoneAssignments || {}).map(([id, assignment]) => {
+        const legacyRadius = Number(assignment?.radius) || 130;
+        return [id, {
+          ...assignment,
+          radiusX: Math.max(40, Math.min(300, Number(assignment?.radiusX) || legacyRadius)),
+          radiusY: Math.max(40, Math.min(300, Number(assignment?.radiusY) || legacyRadius))
+        }];
+      })
+    ),
+    formationAlignments: Object.fromEntries(
+      Object.entries(defense.formationAlignments || {}).map(([formationId, positions]) => [
+        formationId,
+        { ...defaultDefensePositions(), ...(positions || {}) }
+      ])
+    ),
+    labels: defense.labels || {},
+    notes: Array.isArray(defense.notes) ? defense.notes : []
+  };
+}
+
 function loadDefenses() {
   const saved = readJsonStorage(storageKeys.defenses);
   const recovered = Array.isArray(saved) && saved.length
     ? saved
     : recoverySnapshot()?.defenses;
   if (Array.isArray(recovered) && recovered.length) {
-    return recovered.map(defense => ({
-      ...defense,
-      positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
-      routes: defense.routes || {},
-      manAssignments: defense.manAssignments || {},
-      zoneAssignments: Object.fromEntries(
-        Object.entries(defense.zoneAssignments || {}).map(([id, assignment]) => {
-          const legacyRadius = Number(assignment?.radius) || 130;
-          return [id, {
-            ...assignment,
-            radiusX: Math.max(40, Math.min(300, Number(assignment?.radiusX) || legacyRadius)),
-            radiusY: Math.max(40, Math.min(300, Number(assignment?.radiusY) || legacyRadius))
-          }];
-        })
-      ),
-      labels: defense.labels || {},
-      notes: Array.isArray(defense.notes) ? defense.notes : []
-    }));
+    return recovered.map(normalizeDefense);
   }
   const source = plays[0];
   return [{
@@ -357,6 +373,7 @@ function loadDefenses() {
     routes: structuredClone(source.legacyDefenseRoutes?.[source.legacyCoverageId] || {}),
     manAssignments: {},
     zoneAssignments: {},
+    formationAlignments: {},
     labels: {},
     notes: []
   }];
@@ -542,6 +559,20 @@ function currentDefense() {
   return defenses.find(defense => defense.id === selectedDefenseId) || defenses[0];
 }
 
+function defensePositionsForFormation(defense, formationId) {
+  return defense.formationAlignments?.[formationId] || defense.positions;
+}
+
+function currentDefenseEditorPositions() {
+  const defense = currentDefense();
+  if (appTab === "create" && createScreen === "defense" && defenseAlignmentMode) {
+    defense.formationAlignments ||= {};
+    defense.formationAlignments[defenseAlignmentFormationId] ||= structuredClone(defense.positions);
+    return defense.formationAlignments[defenseAlignmentFormationId];
+  }
+  return defense.positions;
+}
+
 function isRunLikeMode() {
   return appTab === "run" || appTab === "test";
 }
@@ -556,7 +587,9 @@ function createRunScenario() {
       return routes;
     }, {}),
     offenseMotions: structuredClone(currentPlay().motions),
-    defensePositions: structuredClone(currentDefense().positions),
+    defensePositions: structuredClone(
+      defensePositionsForFormation(currentDefense(), selectedFormationId)
+    ),
     defenseRoutes: structuredClone(currentDefense().routes),
     manAssignments: structuredClone(currentDefense().manAssignments || {}),
     zoneAssignments: structuredClone(currentDefense().zoneAssignments || {})
@@ -1613,7 +1646,7 @@ function restorePreviousBackup() {
   localStorage.setItem(storageKeys.previousSnapshot, current);
   formations = backup.formations;
   plays = backup.plays.map(normalizePlay);
-  defenses = backup.defenses;
+  defenses = backup.defenses.map(normalizeDefense);
   libraryFolders = Array.isArray(backup.libraryFolders) ? backup.libraryFolders : [];
   libraryAssignments = normalizeLibraryAssignments(backup.libraryAssignments);
   draftPlay = null;
@@ -1646,15 +1679,7 @@ async function importPlaybook(event) {
       notes: Array.isArray(formation.notes) ? formation.notes : []
     }));
     plays = data.plays.map(normalizePlay);
-    defenses = data.defenses.map(defense => ({
-      ...defense,
-      positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
-      routes: defense.routes || {},
-      manAssignments: defense.manAssignments || {},
-      zoneAssignments: defense.zoneAssignments || {},
-      labels: defense.labels || {},
-      notes: Array.isArray(defense.notes) ? defense.notes : []
-    }));
+    defenses = data.defenses.map(normalizeDefense);
     libraryFolders = Array.isArray(data.libraryFolders)
       ? data.libraryFolders.filter(folder => folder?.id && folder?.name).map(folder => ({
           id: folder.id,
@@ -1750,8 +1775,14 @@ function deleteSavedFormation(formationId) {
   }
   if (!window.confirm(`Delete formation "${formation.name}"?`)) return;
   formations = formations.filter(item => item.id !== formationId);
+  defenses.forEach(defense => {
+    if (defense.formationAlignments) delete defense.formationAlignments[formationId];
+  });
   delete libraryAssignments[libraryItemKey("formation", formationId)];
   if (selectedFormationId === formationId) selectedFormationId = formations[0].id;
+  if (defenseAlignmentFormationId === formationId) {
+    defenseAlignmentFormationId = formations[0].id;
+  }
   saveFormations();
   renderPlayControls();
   render();
@@ -1988,6 +2019,30 @@ function renderDefenseControls() {
   ).join("");
   els.defenseSelect.value = selectedDefenseId;
   els.defenseName.value = currentDefense().name;
+  if (!formations.some(formation => formation.id === defenseAlignmentFormationId)) {
+    defenseAlignmentFormationId = formations[0].id;
+  }
+  document.querySelector("#toggleDefenseAlignmentsButton").textContent = defenseAlignmentMode
+    ? "Alignment Setup Active"
+    : "Set Alignments";
+  els.defenseAlignmentControls.classList.toggle("hidden", !defenseAlignmentMode);
+  els.defenseAlignmentFormationSelect.innerHTML = formations.map(formation =>
+    `<option value="${formation.id}">${escapeHtml(formation.name)}${
+      currentDefense().formationAlignments?.[formation.id] ? " (Set)" : ""
+    }</option>`
+  ).join("");
+  els.defenseAlignmentFormationSelect.value = defenseAlignmentFormationId;
+  const alignmentIndex = formations.findIndex(
+    formation => formation.id === defenseAlignmentFormationId
+  );
+  const customAlignmentCount = formations.filter(
+    formation => currentDefense().formationAlignments?.[formation.id]
+  ).length;
+  els.defenseAlignmentProgress.textContent = defenseAlignmentMode
+    ? `Formation ${alignmentIndex + 1} of ${formations.length} | ${customAlignmentCount} custom alignments saved`
+    : "";
+  document.querySelector("#previousDefenseAlignmentButton").disabled = alignmentIndex <= 0;
+  document.querySelector("#nextDefenseAlignmentButton").disabled = alignmentIndex >= formations.length - 1;
   const selectedZone = activeRouteSide === "defense"
     ? currentDefense().zoneAssignments?.[activeRouteId]
     : null;
@@ -2966,7 +3021,7 @@ function defender(x, y, label = "") {
     : savedLabel || label || id;
   const saved = isRunLikeMode()
     ? (runScenario?.defensePositions[id] || currentDefense().positions[id])
-    : currentDefense().positions[id];
+    : currentDefenseEditorPositions()[id];
   defenderStarts[id] = saved || { x, y };
   const playerPosition = animationState?.defense?.[id] || saved || { x, y };
   const route = isRunLikeMode()
@@ -3379,7 +3434,9 @@ function renderReads() {
   } else if (createScreen === "formation") {
     els.boardTitle.textContent = currentFormation().name;
   } else if (createScreen === "defense") {
-    els.boardTitle.textContent = currentDefense().name;
+    els.boardTitle.textContent = defenseAlignmentMode
+      ? `${currentDefense().name} vs. ${currentFormation().name}`
+      : currentDefense().name;
   } else {
     els.boardTitle.textContent = currentPlay().name;
   }
@@ -3405,6 +3462,10 @@ function render() {
   document.body.classList.toggle("create-formation", appTab === "create" && createScreen === "formation");
   document.body.classList.toggle("create-play", appTab === "create" && createScreen === "play");
   document.body.classList.toggle("create-defense", appTab === "create" && createScreen === "defense");
+  document.body.classList.toggle(
+    "defense-alignment-mode",
+    appTab === "create" && createScreen === "defense" && defenseAlignmentMode
+  );
   document.body.classList.toggle("scenario-editing", appTab === "run" && scenarioEditing);
   document.querySelector("#runToolbar").classList.toggle("hidden", appTab !== "run");
   document.querySelector("#testToolbar").classList.toggle("hidden", appTab !== "test");
@@ -3452,12 +3513,16 @@ function render() {
   } ${
     activeRouteSide === "offense" ? offenseLabel(activeRouteId) : (currentDefense().labels[activeRouteId] || activeRouteId)
   }`;
-  els.defensePathHelp.textContent = defenseAssignmentMode === "man"
+  els.defensePathHelp.textContent = defenseAlignmentMode
+    ? "Move defenders into their starting positions for the selected offensive formation."
+    : defenseAssignmentMode === "man"
     ? "Click a defender, then click the receiver or back they guard."
     : defenseAssignmentMode === "zone"
       ? "Place the defender's zone. Any custom movement already drawn will run first at the snap."
       : "Draw the defender's snap movement. You can also assign a zone that takes over when the movement ends.";
-  els.boardModeStatus.textContent = boardMode === "move"
+  els.boardModeStatus.textContent = defenseAlignmentMode
+    ? "Setting alignment for"
+    : boardMode === "move"
     ? "Moving players"
     : createScreen === "defense" && defenseAssignmentMode === "man"
       ? "Assigning man for"
@@ -3468,7 +3533,9 @@ function render() {
     : createScreen === "play" && selectedRouteOptionId !== "base"
       ? "Drawing option for"
     : activeRouteSide === "defense" ? "Drawing defender" : "Drawing";
-  els.routeHelp.textContent = boardMode === "move"
+  els.routeHelp.textContent = defenseAlignmentMode
+    ? `Drag defenders into position against ${currentFormation().name}, then save or move to the next formation.`
+    : boardMode === "move"
     ? "Drag players into position. They snap to the line of scrimmage when close; hold Alt to place freely."
     : createScreen === "defense" && defenseAssignmentMode === "man"
       ? "Click a defender, then click the receiver or back they guard."
@@ -3523,7 +3590,9 @@ function render() {
     : {
         formation: "Move players into position, edit receiver labels, name the formation, and save it.",
         play: "Choose a saved formation, select a receiver, and draw the named play.",
-        defense: "Position defenders, then combine snap movement with zone coverage or assign man coverage."
+        defense: defenseAlignmentMode
+          ? `Setting ${currentDefense().name}'s starting alignment against ${currentFormation().name}.`
+          : "Position defenders, then combine snap movement with zone coverage or assign man coverage."
       }[createScreen];
   document.querySelectorAll(".board-mode-button").forEach(button => {
     button.classList.toggle("active", button.dataset.boardMode === boardMode);
@@ -3702,7 +3771,7 @@ function updateDrawingGuide(event) {
     } else if (createScreen === "defense" && activeRouteSide === "defense"
       && defenseAssignmentMode === "path") {
       const route = currentDefense().routes[activeRouteId] || [];
-      anchor = route[route.length - 1] || currentDefense().positions[activeRouteId];
+      anchor = route[route.length - 1] || currentDefenseEditorPositions()[activeRouteId];
       color = "#ed7048";
       dashed = true;
     }
@@ -3855,7 +3924,7 @@ els.field.addEventListener("click", event => {
     delete currentDefense().manAssignments[activeRouteId];
     currentDefense().routes[activeRouteId] ||= [];
     const route = currentDefense().routes[activeRouteId];
-    const anchor = route[route.length - 1] || currentDefense().positions[activeRouteId];
+    const anchor = route[route.length - 1] || currentDefenseEditorPositions()[activeRouteId];
     route.push(constrainRoutePoint(eventToFieldPoint(event), anchor, event));
   } else {
     return;
@@ -3957,7 +4026,7 @@ els.field.addEventListener("pointermove", event => {
     currentFormation().offensePositions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     renderRoutesAndPlayers();
   } else {
-    currentDefense().positions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
+    currentDefenseEditorPositions()[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     renderDefense();
   }
 });
@@ -3977,13 +4046,91 @@ els.playFormationSelect.addEventListener("change", event => {
   render();
 });
 
+function selectDefenseAlignmentFormation(formationId) {
+  if (!formations.some(formation => formation.id === formationId)) return;
+  defenseAlignmentFormationId = formationId;
+  selectedFormationId = formationId;
+  boardMode = "move";
+  activeRouteSide = "defense";
+  if (!String(activeRouteId).startsWith("D")) activeRouteId = "D0";
+  currentDefenseEditorPositions();
+  renderPlayControls();
+  render();
+}
+
 els.defenseSelect.addEventListener("change", event => {
   selectedDefenseId = event.target.value;
   defenseAssignmentMode = "path";
   activeRouteSide = "defense";
   activeRouteId = "D0";
+  if (defenseAlignmentMode) currentDefenseEditorPositions();
   renderPlayControls();
   render();
+});
+
+document.querySelector("#toggleDefenseAlignmentsButton").addEventListener("click", () => {
+  defenseAlignmentMode = !defenseAlignmentMode;
+  if (defenseAlignmentMode) {
+    selectDefenseAlignmentFormation(
+      formations.some(formation => formation.id === selectedFormationId)
+        ? selectedFormationId
+        : formations[0].id
+    );
+    return;
+  }
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlayControls();
+  render();
+  showSaveSuccess("Formation alignments saved");
+});
+
+els.defenseAlignmentFormationSelect.addEventListener("change", event => {
+  selectDefenseAlignmentFormation(event.target.value);
+});
+
+document.querySelector("#previousDefenseAlignmentButton").addEventListener("click", () => {
+  const index = formations.findIndex(
+    formation => formation.id === defenseAlignmentFormationId
+  );
+  if (index > 0) selectDefenseAlignmentFormation(formations[index - 1].id);
+});
+
+document.querySelector("#nextDefenseAlignmentButton").addEventListener("click", () => {
+  const index = formations.findIndex(
+    formation => formation.id === defenseAlignmentFormationId
+  );
+  if (index >= 0 && index < formations.length - 1) {
+    selectDefenseAlignmentFormation(formations[index + 1].id);
+  }
+});
+
+document.querySelector("#saveDefenseAlignmentButton").addEventListener("click", () => {
+  currentDefenseEditorPositions();
+  lastSavedSignature = "";
+  const saved = persistPlaybook();
+  showSaveSuccess(saved
+    ? `Alignment saved for ${currentFormation().name}`
+    : "Save failed - download a backup");
+  renderDefenseControls();
+});
+
+document.querySelector("#resetDefenseAlignmentButton").addEventListener("click", () => {
+  currentDefense().formationAlignments ||= {};
+  currentDefense().formationAlignments[defenseAlignmentFormationId] =
+    structuredClone(currentDefense().positions);
+  saveDefenses();
+  render();
+  showSaveSuccess(`Default alignment restored for ${currentFormation().name}`);
+});
+
+document.querySelector("#doneDefenseAlignmentsButton").addEventListener("click", () => {
+  defenseAlignmentMode = false;
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlayControls();
+  render();
+  showSaveSuccess("Formation alignments saved");
 });
 
 document.querySelector("#newFormationButton").addEventListener("click", () => {
@@ -4969,6 +5116,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button => {
   button.addEventListener("click", () => {
     stopAnimationPlayback();
     appTab = button.dataset.appTab;
+    if (appTab !== "create") defenseAlignmentMode = false;
     if (appTab === "create" && createScreen === "play") {
       if (!draftPlay) {
         draftPlay = createBlankPlay("");
@@ -4994,6 +5142,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button => {
 document.querySelectorAll("[data-create-screen]").forEach(button => {
   button.addEventListener("click", () => {
     createScreen = button.dataset.createScreen;
+    if (createScreen !== "defense") defenseAlignmentMode = false;
     animationState = null;
     activeRouteSide = createScreen === "defense" ? "defense" : "offense";
     activeRouteId = createScreen === "defense" ? "D0" : "X";
@@ -5055,7 +5204,7 @@ async function initializeApp() {
       && indexedBackup?.defenses?.length) {
       plays = indexedBackup.plays.map(normalizePlay);
       formations = indexedBackup.formations;
-      defenses = indexedBackup.defenses;
+      defenses = indexedBackup.defenses.map(normalizeDefense);
       libraryFolders = Array.isArray(indexedBackup.libraryFolders)
         ? indexedBackup.libraryFolders
         : [];
@@ -5105,15 +5254,7 @@ function applySharedPlaybook(snapshot) {
     notes: Array.isArray(formation.notes) ? formation.notes : []
   }));
   plays = snapshot.plays.map(normalizePlay);
-  defenses = snapshot.defenses.map(defense => ({
-    ...defense,
-    positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
-    routes: defense.routes || {},
-    manAssignments: defense.manAssignments || {},
-    zoneAssignments: defense.zoneAssignments || {},
-    labels: defense.labels || {},
-    notes: Array.isArray(defense.notes) ? defense.notes : []
-  }));
+  defenses = snapshot.defenses.map(normalizeDefense);
   libraryFolders = Array.isArray(snapshot.libraryFolders)
     ? snapshot.libraryFolders
     : [];

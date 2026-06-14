@@ -325,6 +325,22 @@
             <button id="newDefenseButton" class="route-tool-button">New Defense</button>
             <button id="saveDefenseButton" class="route-tool-button">Save Defense</button>
           </div>
+          <button id="toggleDefenseAlignmentsButton" class="route-tool-button full-width">Set Alignments</button>
+          <div id="defenseAlignmentControls" class="defense-alignment-controls hidden">
+            <p class="eyebrow">Formation alignment</p>
+            <label class="field-label" for="defenseAlignmentFormationSelect">Line up against</label>
+            <select id="defenseAlignmentFormationSelect"></select>
+            <p id="defenseAlignmentProgress" class="defense-alignment-progress"></p>
+            <div class="defense-alignment-actions">
+              <button id="previousDefenseAlignmentButton" class="route-tool-button">Previous</button>
+              <button id="saveDefenseAlignmentButton" class="route-tool-button">Save Alignment</button>
+              <button id="nextDefenseAlignmentButton" class="route-tool-button">Next</button>
+            </div>
+            <div class="defense-alignment-actions">
+              <button id="resetDefenseAlignmentButton" class="route-tool-button danger">Use Default</button>
+              <button id="doneDefenseAlignmentsButton" class="route-tool-button">Done</button>
+            </div>
+          </div>
         </div>
 
         <div class="defense-path-card">
