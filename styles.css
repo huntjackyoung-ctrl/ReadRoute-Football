@@ -1565,6 +1565,8 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
 .route-hit-target { cursor: pointer; }
 .move-mode .movable-player { cursor: grab; }
 .move-mode .movable-player:active { cursor: grabbing; }
+.play-specific-running-back { cursor: grab; }
+.play-specific-running-back:active { cursor: grabbing; }
 .route-handle { cursor: grab; }
 .route-handle:active { cursor: grabbing; }
 .segment-speed-control {

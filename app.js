@@ -579,7 +579,7 @@ function isRunLikeMode() {
 
 function createRunScenario() {
   return {
-    offensePositions: structuredClone(currentFormation().offensePositions),
+    offensePositions: structuredClone(currentPlay().offensePositions),
     offenseRoutes: skillPositions.reduce((routes, position) => {
       routes[position.id] = structuredClone(
         resolvedRouteForDefense(currentPlay(), position.id, selectedDefenseId)
@@ -1883,8 +1883,12 @@ function libraryPreviewMarkup() {
   const formation = isDefense
     ? currentFormation()
     : formations.find(savedFormation => savedFormation.id === item.formationId) || formations[0];
-  const offensePositions = formation.offensePositions;
-  const offenseLabels = formation.labels;
+  const offensePositions = isDefense
+    ? formation.offensePositions
+    : item.offensePositions || formation.offensePositions;
+  const offenseLabels = isDefense
+    ? formation.labels
+    : item.labels || formation.labels;
   const routeMarkup = isDefense ? "" : skillPositions.map(position => {
     const route = item.routes[position.id] || [];
     const motion = item.motions?.[position.id] || [];
@@ -2624,6 +2628,11 @@ function createPreviewRoute(id, start) {
 
 function makeMovable(group, side, id) {
   group.classList.add("movable-player");
+  const isPlaySpecificRunningBack = () => appTab === "create"
+    && createScreen === "play"
+    && side === "offense"
+    && id === "RB";
+  if (isPlaySpecificRunningBack()) group.classList.add("play-specific-running-back");
   group.addEventListener("click", event => {
     event.stopPropagation();
     const createMove = appTab === "create" && boardMode === "move"
@@ -2631,7 +2640,7 @@ function makeMovable(group, side, id) {
     const defenseOnlyScenarioTool = scenarioTool === "man" || scenarioTool === "zone";
     const scenarioSelect = appTab === "run" && scenarioEditing
       && (!defenseOnlyScenarioTool || side === "defense");
-    if (!createMove && !scenarioSelect) return;
+    if (!createMove && !scenarioSelect && !isPlaySpecificRunningBack()) return;
     activeRouteSide = side;
     activeRouteId = id;
     if (appTab === "create") renderPlayControls();
@@ -2641,7 +2650,7 @@ function makeMovable(group, side, id) {
     const createMove = appTab === "create" && boardMode === "move"
       && ((side === "offense" && createScreen === "formation") || (side === "defense" && createScreen === "defense"));
     const scenarioMove = appTab === "run" && scenarioEditing && scenarioTool === "move";
-    if (!createMove && !scenarioMove) return;
+    if (!createMove && !scenarioMove && !isPlaySpecificRunningBack()) return;
     event.preventDefault();
     event.stopPropagation();
     activeRouteSide = side;
@@ -3608,7 +3617,7 @@ function render() {
         : "No route options match this defense. The base routes will run.")
     : {
         formation: "Move players into position, edit receiver labels, name the formation, and save it.",
-        play: "Choose a saved formation, select a receiver, and draw the named play.",
+        play: "Choose a saved formation, draw the named play, and drag the RB anywhere for this play only.",
         defense: defenseAlignmentMode
           ? `Setting ${currentDefense().name}'s starting alignment against ${currentFormation().name}.`
           : "Position defenders, then combine snap movement with zone coverage or assign man coverage."
@@ -4039,10 +4048,17 @@ els.field.addEventListener("pointermove", event => {
     renderDefense();
     return;
   }
-  if (boardMode !== "move") return;
+  const playSpecificRunningBack = appTab === "create"
+    && createScreen === "play"
+    && dragState.side === "offense"
+    && dragState.id === "RB";
+  if (boardMode !== "move" && !playSpecificRunningBack) return;
   const playerPoint = snapPlayerToScrimmage(point, event);
   if (dragState.side === "offense") {
-    currentFormation().offensePositions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
+    const positions = playSpecificRunningBack
+      ? currentPlay().offensePositions
+      : currentFormation().offensePositions;
+    positions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     renderRoutesAndPlayers();
   } else {
     currentDefenseEditorPositions()[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
