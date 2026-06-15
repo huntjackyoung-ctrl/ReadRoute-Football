@@ -1292,6 +1292,35 @@ function customFolderBrowserMarkup() {
   `;
 }
 
+function selectLibraryPreview(type, id) {
+  const pageScroll = {
+    x: window.scrollX,
+    y: window.scrollY
+  };
+  const fileBrowser = els.playbookLibrary.querySelector(".library-files");
+  const fileBrowserScroll = {
+    left: fileBrowser?.scrollLeft || 0,
+    top: fileBrowser?.scrollTop || 0
+  };
+
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  libraryPreview = { type, id };
+  renderPlaybookLibrary();
+
+  const restoreScroll = () => {
+    const updatedFileBrowser = els.playbookLibrary.querySelector(".library-files");
+    if (updatedFileBrowser) {
+      updatedFileBrowser.scrollLeft = fileBrowserScroll.left;
+      updatedFileBrowser.scrollTop = fileBrowserScroll.top;
+    }
+    window.scrollTo(pageScroll.x, pageScroll.y);
+  };
+  restoreScroll();
+  requestAnimationFrame(restoreScroll);
+}
+
 function renderPlaybookLibrary() {
   rememberLibraryFolderState();
   const formationFolders = formations.map(formation => {
@@ -1390,23 +1419,13 @@ function renderPlaybookLibrary() {
 
   els.playbookLibrary.querySelectorAll("[data-library-play]").forEach(button => {
     button.addEventListener("click", () => {
-      libraryPreview = { type: "play", id: button.dataset.libraryPlay };
-      renderPlaybookLibrary();
-      requestAnimationFrame(() => {
-        els.playbookLibrary.querySelector(".library-preview")
-          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
+      selectLibraryPreview("play", button.dataset.libraryPlay);
     });
   });
 
   els.playbookLibrary.querySelectorAll("[data-library-defense]").forEach(button => {
     button.addEventListener("click", () => {
-      libraryPreview = { type: "defense", id: button.dataset.libraryDefense };
-      renderPlaybookLibrary();
-      requestAnimationFrame(() => {
-        els.playbookLibrary.querySelector(".library-preview")
-          ?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-      });
+      selectLibraryPreview("defense", button.dataset.libraryDefense);
     });
   });
 
@@ -4295,9 +4314,14 @@ function interpolateTimedPath(start, points, elapsedSeconds, baseSpeed = 115) {
   return points.length ? { ...points[points.length - 1] } : { ...start };
 }
 
+function safeVelocity(distance, deltaSeconds) {
+  const safeDelta = Math.max(.008, Math.min(.05, Number(deltaSeconds) || .016));
+  return distance / safeDelta;
+}
+
 function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
-  const reactionTime = 0.12;
+  const reactionTime = state.initialCushion < 55 ? 0.09 : 0.14;
   if (elapsed < reactionTime || !safeDelta) {
     state.lastReceiver = { ...receiverPosition };
     return { x: state.x, y: state.y };
@@ -4322,13 +4346,29 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const lateralBreak = Math.abs(receiverVx) > Math.max(34, Math.abs(receiverVy) * 1.2);
   const downhillBreak = receiverVy > 18;
   if (receiverDepth > 18 || verticalRelease) state.deepThreatened = true;
-  const routeBreak = elapsed > .2 && (
+  const routeBreakEvidence = elapsed > .2 && (
     downhillBreak
     || (state.deepThreatened && lateralBreak)
     || (state.deepThreatened && directionChange > .85)
     || (elapsed > .3 && receiverLateralTravel > 24 && lateralBreak)
   );
-  if (routeBreak) state.breakConfirmed = true;
+  state.breakEvidence = Math.max(
+    0,
+    (state.breakEvidence || 0) + (routeBreakEvidence ? safeDelta : -safeDelta * 1.7)
+  );
+  if (state.breakEvidence >= .08) state.breakConfirmed = true;
+  const renewedVerticalThreat = state.breakConfirmed
+    && receiverVy < -42
+    && Math.abs(receiverVy) > Math.abs(receiverVx) * 1.12;
+  if (renewedVerticalThreat) {
+    state.verticalRecoveryTime = (state.verticalRecoveryTime || 0) + safeDelta;
+    if (state.verticalRecoveryTime > .1) {
+      state.breakConfirmed = false;
+      state.breakEvidence = 0;
+    }
+  } else {
+    state.verticalRecoveryTime = 0;
+  }
   if (state.breakConfirmed) {
     state.phase = "drive";
   } else if (state.deepThreatened) {
@@ -4345,13 +4385,19 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
 
   if (state.phase === "mirror") {
     // Hold depth and mirror the release until the receiver threatens vertically.
-    targetX = receiverPosition.x + state.horizontalLeverage;
+    const leverage = Math.max(-42, Math.min(42, state.horizontalLeverage));
+    targetX = receiverPosition.x + leverage;
     targetY = state.start.y;
-    maxSpeed = 94;
-    acceleration = 470;
+    maxSpeed = state.initialCushion < 55 ? 104 : 92;
+    acceleration = state.initialCushion < 55 ? 560 : 450;
   } else if (state.phase === "carry") {
     // Open and carry from an over-the-top position instead of chasing the receiver's hip.
-    const desiredCushion = cushion < 22 ? 30 : cushion > 45 ? 38 : cushion;
+    const baseCarryCushion = state.initialCushion < 55 ? 20 : 30;
+    const desiredCushion = cushion < baseCarryCushion
+      ? baseCarryCushion + 7
+      : cushion > 48
+        ? 40
+        : cushion;
     targetX = receiverPosition.x + (state.horizontalLeverage * .55);
     targetY = Math.min(state.start.y, receiverPosition.y - desiredCushion);
     const receiverIsLevel = cushion < 10;
@@ -4359,10 +4405,10 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
     maxSpeed = receiverIsLevel ? 154 : cushionThreatened ? 140 : 122;
     acceleration = receiverIsLevel ? 940 : cushionThreatened ? 800 : 680;
   } else {
-    // Once the receiver declares the break, plant and drive toward the near hip.
-    const trailDistance = state.deepThreatened ? 10 : 7;
+    // Once the receiver declares the break, plant and drive toward the upfield hip.
+    const trailDistance = state.deepThreatened ? 8 : 5;
     targetX = receiverPosition.x - (directionX * trailDistance);
-    targetY = receiverPosition.y - (directionY * trailDistance);
+    targetY = receiverPosition.y - Math.min(0, directionY * trailDistance);
     const separationFromReceiver = Math.hypot(
       receiverPosition.x - state.x,
       receiverPosition.y - state.y
@@ -4386,6 +4432,8 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   state.vy += (desiredVy - state.vy) * velocityRatio;
   state.x += state.vx * safeDelta;
   state.y += state.vy * safeDelta;
+  state.x = Math.max(18, Math.min(882, state.x));
+  state.y = Math.max(18, Math.min(602, state.y));
   if (state.phase !== "drive" && state.y > state.start.y) {
     state.y = state.start.y;
     state.vy = Math.min(0, state.vy);
@@ -4407,11 +4455,47 @@ function clampToZone(point, zone) {
   };
 }
 
-function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeepHelp = false) {
-  const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
-  const isDeepSafety = state.start.y < lineOfScrimmage - 190;
-  const reactionTime = isDeepSafety ? .42 : .24;
+function receiverThreatScore(receiver, zone, state, isDeepSafety, hasDeepHelp, claimCount = 0) {
   const radii = zoneRadii(zone);
+  const projected = {
+    x: receiver.x + (receiver.vx * .16),
+    y: receiver.y + (receiver.vy * .16)
+  };
+  const distance = zoneDistance(projected, zone);
+  const verticalSpeed = Math.max(0, -receiver.vy);
+  const routeDepth = Math.max(0, lineOfScrimmage - receiver.y);
+  const movingIntoZone = receiver.zoneDistancePrevious - distance;
+  let score = (1.45 - Math.min(1.45, distance)) * 80;
+  score += Math.min(30, Math.max(-12, movingIntoZone * 125));
+  score += Math.min(24, verticalSpeed * .16);
+  if (isDeepSafety) {
+    score += Math.min(55, routeDepth * .16);
+    score += receiver.y < state.y + 70 ? 34 : 0;
+    score -= receiver.vy > 28 ? 24 : 0;
+  } else {
+    score += receiver.y >= zone.y - radii.y * .8 ? 14 : 0;
+    score += !hasDeepHelp && receiver.vy < -30 ? 8 : 0;
+  }
+  score -= claimCount * (isDeepSafety ? 8 : 28);
+  if (state.primaryThreatId === receiver.id) score += 18;
+  return score;
+}
+
+function moveZoneDefender(
+  state,
+  zone,
+  receivers,
+  elapsed,
+  deltaSeconds,
+  hasDeepHelp = false,
+  coverageClaims = new Map()
+) {
+  const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
+  const radii = zoneRadii(zone);
+  const isDeepSafety = state.start.y < lineOfScrimmage - 190
+    || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75);
+  const isFlatDefender = zone.y > lineOfScrimmage - 105;
+  const reactionTime = isDeepSafety ? .3 : isFlatDefender ? .16 : .21;
   const deepThreatLine = Math.max(
     state.start.y,
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
@@ -4419,69 +4503,91 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
   const threats = receivers
     .map(receiver => ({
       ...receiver,
-      zoneDistance: zoneDistance(receiver, zone)
+      zoneDistance: zoneDistance(receiver, zone),
+      threatScore: receiverThreatScore(
+        receiver,
+        zone,
+        state,
+        isDeepSafety,
+        hasDeepHelp,
+        coverageClaims.get(receiver.id) || 0
+      )
     }))
-    .filter(receiver => receiver.zoneDistance <= 1.18)
-    .sort((a, b) => {
-      if (isDeepSafety) return a.y - b.y || a.zoneDistance - b.zoneDistance;
-      return a.zoneDistance - b.zoneDistance;
-    });
+    .filter(receiver => receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28))
+    .sort((a, b) => b.threatScore - a.threatScore);
 
   let target = { ...state.start };
   let carryingDeepThreat = false;
-  if (elapsed > .8 && !threats.length) {
+  if (elapsed > .55 && !threats.length) {
     target = {
-      x: state.start.x + ((zone.x - state.start.x) * .25),
-      y: state.start.y + ((zone.y - state.start.y) * .25)
+      x: state.start.x + ((zone.x - state.start.x) * .22),
+      y: state.start.y + ((zone.y - state.start.y) * (isDeepSafety ? .08 : .2))
     };
   }
-  if (elapsed >= reactionTime && isDeepSafety && !hasDeepHelp) {
-    const deepestThreat = receivers
+  if (elapsed >= reactionTime && isDeepSafety) {
+    const verticalThreats = receivers
       .filter(receiver =>
-        receiver.y <= deepThreatLine
-        && Math.abs(receiver.x - zone.x) <= radii.x * 1.75
+        receiver.y <= deepThreatLine + 80
+        && receiver.vy < 18
+        && Math.abs(receiver.x - zone.x) <= radii.x * 1.65
       )
-      .sort((a, b) => a.y - b.y)[0];
-    if (deepestThreat) {
+      .sort((a, b) => a.y - b.y);
+    if (verticalThreats.length) {
+      const deepestThreat = verticalThreats[0];
+      const nearbyVerticals = verticalThreats.filter(receiver =>
+        receiver.y <= deepestThreat.y + 55
+      );
+      const leftmost = nearbyVerticals.reduce((left, receiver) =>
+        receiver.x < left.x ? receiver : left, deepestThreat);
+      const rightmost = nearbyVerticals.reduce((right, receiver) =>
+        receiver.x > right.x ? receiver : right, deepestThreat);
+      const splitX = nearbyVerticals.length > 1
+        ? (leftmost.x + rightmost.x) / 2
+        : deepestThreat.x;
       carryingDeepThreat = true;
       state.deepThreatId = deepestThreat.id;
+      state.primaryThreatId = deepestThreat.id;
       target = {
-        x: deepestThreat.x,
-        y: Math.min(deepThreatLine, deepestThreat.y - 30)
+        x: zone.x + ((splitX - zone.x) * (hasDeepHelp ? .58 : .78)),
+        y: Math.min(deepThreatLine, deepestThreat.y - (hasDeepHelp ? 22 : 32))
       };
+      coverageClaims.set(
+        deepestThreat.id,
+        (coverageClaims.get(deepestThreat.id) || 0) + 1
+      );
     }
   }
   if (!carryingDeepThreat && elapsed >= reactionTime && threats.length) {
     const primary = threats[0];
+    state.primaryThreatId = primary.id;
+    coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
-      const verticalThreats = threats.filter(receiver => receiver.y < lineOfScrimmage - 85);
-      const left = verticalThreats.reduce((minimum, receiver) =>
-        receiver.x < minimum.x ? receiver : minimum, primary);
-      const right = verticalThreats.reduce((maximum, receiver) =>
-        receiver.x > maximum.x ? receiver : maximum, primary);
-      const midpointX = verticalThreats.length > 1
-        ? (left.x + right.x) / 2
-        : primary.x;
       target = {
-        x: zone.x + ((midpointX - zone.x) * .68),
-        y: Math.min(deepThreatLine, primary.y - 34)
+        x: zone.x + ((primary.x - zone.x) * .62),
+        y: Math.min(deepThreatLine, primary.y - 30)
       };
     } else {
+      const routeBreakingOut = Math.abs(primary.vx) > Math.abs(primary.vy) * 1.05;
+      const routeBreakingDown = primary.vy > 22;
+      const driveFactor = routeBreakingOut || routeBreakingDown ? .9 : .68;
+      const depthLeverage = primary.vy < -22 && !hasDeepHelp ? 18 : 8;
       target = {
-        x: zone.x + ((primary.x - zone.x) * .78),
-        y: primary.y - 12
+        x: zone.x + ((primary.x - zone.x) * driveFactor),
+        y: primary.y - depthLeverage
       };
     }
+  } else if (!threats.length && state.primaryThreatId) {
+    state.primaryThreatId = null;
   }
   if (!carryingDeepThreat) target = clampToZone(target, zone);
 
   const gapX = target.x - state.x;
   const gapY = target.y - state.y;
   const separation = Math.hypot(gapX, gapY);
-  const maxSpeed = carryingDeepThreat ? 132 : isDeepSafety ? 78 : 92;
+  const maxSpeed = carryingDeepThreat ? 136 : isDeepSafety ? 84 : isFlatDefender ? 106 : 96;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
-  const acceleration = carryingDeepThreat ? 720 : isDeepSafety ? 360 : 430;
+  const acceleration = carryingDeepThreat ? 760 : isDeepSafety ? 410 : isFlatDefender ? 560 : 480;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
@@ -4499,6 +4605,8 @@ function moveZoneDefender(state, zone, receivers, elapsed, deltaSeconds, hasDeep
     : 0;
   state.x += proposedDx * frameRatio;
   state.y += proposedDy * frameRatio;
+  state.x = Math.max(18, Math.min(882, state.x));
+  state.y = Math.max(18, Math.min(602, state.y));
   if (isDeepSafety && state.y > deepThreatLine) {
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
@@ -4586,6 +4694,8 @@ function previewMovement(scope) {
             phase: "mirror",
             deepThreatened: false,
             breakConfirmed: false,
+            breakEvidence: 0,
+            verticalRecoveryTime: 0,
             lastReceiver: {
               ...manTargetStart
             },
@@ -4597,7 +4707,9 @@ function previewMovement(scope) {
             y: zoneStart.y,
             vx: 0,
             vy: 0,
-            start: zoneStart
+            start: zoneStart,
+            primaryThreatId: null,
+            deepThreatId: null
           }
         };
       })
@@ -4627,6 +4739,12 @@ function previewMovement(scope) {
     pausedDuration: 0,
     startedAt,
     lastFrameAt: startedAt,
+    receiverHistory: Object.fromEntries(
+      skillPositions.map(position => [
+        position.id,
+        { ...(animationState.offense[position.id] || editorOffensePositions()[position.id]) }
+      ])
+    ),
     animate: null
   };
   updatePlaybackUi();
@@ -4648,6 +4766,19 @@ function previewMovement(scope) {
           : interpolateTimedPath(snapStart, route, elapsed - maxMotionDuration, baseSpeed);
       });
     }
+    const receiverSnapshots = skillPositions.map(position => {
+      const current = animationState.offense[position.id]
+        || editorOffensePositions()[position.id];
+      const previous = animationPlayback.receiverHistory[position.id] || current;
+      return {
+        id: position.id,
+        ...current,
+        vx: safeVelocity(current.x - previous.x, deltaSeconds),
+        vy: safeVelocity(current.y - previous.y, deltaSeconds),
+        zoneDistancePrevious: 0
+      };
+    });
+    const coverageClaims = new Map();
     if (animateDefense) {
       defensePaths.forEach(({
         id,
@@ -4682,6 +4813,8 @@ function previewMovement(scope) {
             manState.phase = "mirror";
             manState.deepThreatened = false;
             manState.breakConfirmed = false;
+            manState.breakEvidence = 0;
+            manState.verticalRecoveryTime = 0;
             manState.lastReceiver = { ...targetPosition };
             manState.lastDirection = { x: 0, y: -1 };
             manState.postSnapStarted = true;
@@ -4702,9 +4835,12 @@ function previewMovement(scope) {
             );
             return;
           }
-          const receivers = skillPositions.map(position => ({
-            id: position.id,
-            ...(animationState.offense[position.id] || editorOffensePositions()[position.id])
+          const receivers = receiverSnapshots.map(receiver => ({
+            ...receiver,
+            zoneDistancePrevious: zoneDistance(
+              animationPlayback.receiverHistory[receiver.id] || receiver,
+              zoneAssignment
+            )
           }));
           const hasDeepHelp = defensePaths.some(other =>
             other.id !== id
@@ -4719,7 +4855,8 @@ function previewMovement(scope) {
             receivers,
             Math.max(0, postSnapElapsed - routeDuration),
             deltaSeconds,
-            hasDeepHelp
+            hasDeepHelp,
+            coverageClaims
           );
         } else if (postSnapElapsed >= 0) {
           animationState.defense[id] = interpolateTimedPath(
@@ -4731,6 +4868,12 @@ function previewMovement(scope) {
         }
       });
     }
+    receiverSnapshots.forEach(receiver => {
+      animationPlayback.receiverHistory[receiver.id] = {
+        x: receiver.x,
+        y: receiver.y
+      };
+    });
     renderRoutesAndPlayers();
     renderDefense();
     if (elapsed < totalDuration) {
