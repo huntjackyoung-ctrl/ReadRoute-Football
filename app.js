@@ -15,6 +15,7 @@ const offensiveLine = [
 ];
 
 const quarterback = { id: "QB", label: "QB", x: 450, y: 540 };
+const routeableOffense = [...skillPositions, quarterback];
 const defensePositionLabels = ["DE", "DT", "DT", "DE", "OLB", "MLB", "OLB", "CB", "FS", "SS", "CB"];
 const lineOfScrimmage = 476;
 const scrimmageSnapDistance = 16;
@@ -75,9 +76,9 @@ function createBlankPlay(name = "Untitled Play") {
     id: crypto.randomUUID(),
     name,
     labels: { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
-    routes: { X: [], H: [], Y: [], Z: [], RB: [] },
+    routes: { X: [], H: [], Y: [], Z: [], RB: [], QB: [] },
     routeOptions: { X: [], H: [], Y: [], Z: [], RB: [] },
-    motions: { X: [], H: [], Y: [], Z: [], RB: [] },
+    motions: { X: [], H: [], Y: [], Z: [], RB: [], QB: [] },
     offensePositions: defaultOffensePositions(),
     formationId: null,
     notes: []
@@ -258,7 +259,7 @@ function normalizePlay(play) {
       labels[position.id] = play.labels?.[position.id] || position.id;
       return labels;
     }, {}),
-    routes: skillPositions.reduce((routes, position) => {
+    routes: routeableOffense.reduce((routes, position) => {
       const savedRoute = play.routes?.[position.id];
       routes[position.id] = normalizePath(savedRoute);
       return routes;
@@ -285,7 +286,7 @@ function normalizePlay(play) {
         : [];
       return options;
     }, {}),
-    motions: skillPositions.reduce((motions, position) => {
+    motions: routeableOffense.reduce((motions, position) => {
       const savedMotion = play.motions?.[position.id];
       motions[position.id] = normalizePath(savedMotion);
       return motions;
@@ -580,9 +581,11 @@ function isRunLikeMode() {
 function createRunScenario() {
   return {
     offensePositions: structuredClone(currentPlay().offensePositions),
-    offenseRoutes: skillPositions.reduce((routes, position) => {
+    offenseRoutes: routeableOffense.reduce((routes, position) => {
       routes[position.id] = structuredClone(
-        resolvedRouteForDefense(currentPlay(), position.id, selectedDefenseId)
+        isSkillPosition(position.id)
+          ? resolvedRouteForDefense(currentPlay(), position.id, selectedDefenseId)
+          : currentPlay().routes[position.id] || []
       );
       return routes;
     }, {}),
@@ -746,10 +749,10 @@ function matchedRouteOption(play, id, defenseId) {
 
 function emptyPlayPaths(play) {
   play.routeOptions ||= {};
-  skillPositions.forEach(position => {
+  routeableOffense.forEach(position => {
     play.routes[position.id] = [];
-    play.routeOptions[position.id] = [];
     play.motions[position.id] = [];
+    if (isSkillPosition(position.id)) play.routeOptions[position.id] = [];
   });
 }
 
@@ -758,10 +761,10 @@ function draftHasWork(play) {
   return Boolean(
     play.name?.trim()
     || play.notes?.length
-    || skillPositions.some(position =>
+    || routeableOffense.some(position =>
       play.routes[position.id]?.length
       || play.motions[position.id]?.length
-      || play.routeOptions[position.id]?.length
+      || (isSkillPosition(position.id) && play.routeOptions[position.id]?.length)
     )
   );
 }
@@ -827,6 +830,10 @@ function editorOffensePositions() {
 
 function isSkillPosition(id) {
   return skillPositions.some(position => position.id === id);
+}
+
+function isRouteableOffense(id) {
+  return isSkillPosition(id) || id === "QB";
 }
 
 function snapPlayerToScrimmage(point, event) {
@@ -952,7 +959,7 @@ function renderPlayControls() {
   els.mirrorPlayFormationSelect.disabled = !mirrorTargets.length;
   document.querySelector("#mirrorPlayButton").disabled = !mirrorTargets.length;
   els.assignmentActionHeading.textContent = createScreen === "formation" ? "Select" : "Route";
-  els.assignments.innerHTML = skillPositions.map(position => `
+  const skillAssignmentRows = skillPositions.map(position => `
     <div class="assignment-row">
       <input data-label="${position.id}" value="${escapeHtml(offenseLabel(position.id))}" maxlength="4" aria-label="${position.id} display label">
       <button class="route-select-button ${activeRouteSide === "offense" && position.id === activeRouteId ? "active" : ""}" data-position="${position.id}">
@@ -962,11 +969,23 @@ function renderPlayControls() {
       </button>
     </div>
   `).join("");
+  const qbAssignmentRow = createScreen === "play"
+    ? `
+      <div class="assignment-row qb-assignment-row">
+        <span class="fixed-assignment-label">QB</span>
+        <button class="route-select-button ${activeRouteSide === "offense" && activeRouteId === "QB" ? "active" : ""}" data-position="QB">
+          R ${(currentPlay().routes.QB || []).length}
+        </button>
+      </div>
+    `
+    : "";
+  els.assignments.innerHTML = skillAssignmentRows + qbAssignmentRow;
   els.assignments.querySelectorAll(".route-select-button").forEach(button => {
     button.addEventListener("click", event => {
       activeRouteSide = "offense";
       activeRouteId = event.currentTarget.dataset.position;
       selectedRouteOptionId = "base";
+      if (activeRouteId === "QB") playPathType = "route";
       if (createScreen === "formation") boardMode = "move";
       renderPlayControls();
       renderRoutesAndPlayers();
@@ -1907,6 +1926,17 @@ function libraryPreviewMarkup() {
       : "";
     return motionPath + routePath;
   }).join("");
+  const qbRouteMarkup = isDefense
+    ? ""
+    : (() => {
+        const start = offensePositions.QB;
+        const route = item.routes.QB || [];
+        if (!route.length) return "";
+        const pathData = route.length === 1
+          ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}`
+          : routePathData(start, route);
+        return `<path d="${pathData}" fill="none" stroke="#f2c35a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`;
+      })();
   const optionRouteMarkup = isDefense ? "" : skillPositions.map(position => {
     const start = offensePositions[position.id];
     const motion = item.motions?.[position.id] || [];
@@ -2009,7 +2039,7 @@ function libraryPreviewMarkup() {
       </defs>
       <rect width="900" height="620" rx="10" fill="#174c35"></rect>
       ${libraryFieldMarkingsMarkup()}
-      ${routeMarkup}${optionRouteMarkup}${offenseMarkup}${defenseMarkup}${notesMarkup}
+      ${routeMarkup}${qbRouteMarkup}${optionRouteMarkup}${offenseMarkup}${defenseMarkup}${notesMarkup}
     </svg>
     </div>
     ${routeOptionSummary
@@ -2487,17 +2517,19 @@ function mirroredPlay(sourcePlay, sourceFormation, targetFormation) {
     id: crypto.randomUUID(),
     x: Math.max(8, 900 - note.x - (note.width || 170))
   }));
-  skillPositions.forEach(position => {
+  routeableOffense.forEach(position => {
     const id = position.id;
     const sourceStart = sourceFormation.offensePositions[id];
     const targetStart = targetFormation.offensePositions[id];
     mirrored.routes[id] = mirroredPath(sourcePlay.routes[id], sourceStart, targetStart);
     mirrored.motions[id] = mirroredPath(sourcePlay.motions[id], sourceStart, targetStart);
-    mirrored.routeOptions[id] = routeOptionsFor(sourcePlay, id).map(option => ({
-      ...structuredClone(option),
-      id: crypto.randomUUID(),
-      points: mirroredPath(option.points, sourceStart, targetStart)
-    }));
+    if (isSkillPosition(id)) {
+      mirrored.routeOptions[id] = routeOptionsFor(sourcePlay, id).map(option => ({
+        ...structuredClone(option),
+        id: crypto.randomUUID(),
+        points: mirroredPath(option.points, sourceStart, targetStart)
+      }));
+    }
   });
   return mirrored;
 }
@@ -3006,7 +3038,7 @@ function renderRoutesAndPlayers() {
 
   const qbStart = editorOffensePositions().QB;
   const qbPosition = offensePosition("QB");
-  const qbRoute = isRunLikeMode() ? routeForFormation("QB") : [];
+  const qbRoute = showOffensiveRoutes ? routeForFormation("QB") : [];
   appendRoutePath(els.routes, qbStart, qbRoute, {
     fill: "none",
     stroke: "#f2c35a",
@@ -3024,6 +3056,17 @@ function renderRoutesAndPlayers() {
     qb.append(svgEl("circle", { class: "selection-ring", r: 26 }));
   }
   makeMovable(qb, "offense", "QB");
+  qb.classList.add("route-hit-target");
+  qb.addEventListener("click", event => {
+    event.stopPropagation();
+    if (appTab !== "create" || createScreen !== "play" || boardMode === "move") return;
+    activeRouteSide = "offense";
+    activeRouteId = "QB";
+    selectedRouteOptionId = "base";
+    playPathType = "route";
+    renderPlayControls();
+    renderRoutesAndPlayers();
+  });
   qb.append(svgEl("circle", {
     r: 19,
     fill: qbSelected ? "#c9f45c" : "#f2c35a",
@@ -3034,6 +3077,41 @@ function renderRoutesAndPlayers() {
   qbText.textContent = "QB";
   qb.append(qbText);
   els.players.append(qb);
+
+  const editingCreateQbPath = appTab === "create" && createScreen === "play"
+    && activeRouteSide === "offense" && activeRouteId === "QB";
+  const editingScenarioQbPath = appTab === "run" && scenarioEditing
+    && scenarioTool === "draw" && activeRouteSide === "offense"
+    && activeRouteId === "QB";
+  if (editingCreateQbPath || editingScenarioQbPath) {
+    qbRoute.forEach((point, index) => {
+      const canRound = index < qbRoute.length - 1;
+      const handle = svgEl("g", { transform: `translate(${point.x} ${point.y})` });
+      handle.classList.add("route-handle");
+      if (canRound) handle.classList.add("round-toggle");
+      handle.append(svgEl("circle", {
+        r: canRound ? 9 : 7,
+        fill: canRound && point.rounded ? "#c9f45c" : "#fffdf7",
+        stroke: canRound ? "#10231c" : "#f2c35a",
+        "stroke-width": 3
+      }));
+      if (editingCreateQbPath && canRound) appendSegmentSpeedControl(handle, point);
+      handle.addEventListener("pointerdown", event => beginPathPointDrag(
+        event,
+        qbRoute,
+        index,
+        { x: 0, y: 0 },
+        qbStart,
+        canRound
+          ? () => {
+              point.rounded = !point.rounded;
+            }
+          : null
+      ));
+      handle.addEventListener("click", event => event.stopPropagation());
+      els.routes.append(handle);
+    });
+  }
 }
 
 let defenderRenderIndex = 0;
@@ -3580,9 +3658,11 @@ function render() {
     : activeRouteSide === "defense"
       ? "Click to add movement points. Drag a point to adjust it; hold Shift for a straight line."
       : "Click to add route points. Drag a point to adjust it; hold Shift for a straight line. Click a break point to round it.";
-  const routeUnavailable = boardMode === "move" || (activeRouteSide === "offense" && !isSkillPosition(activeRouteId));
+  const routeUnavailable = boardMode === "move"
+    || (activeRouteSide === "offense" && !isRouteableOffense(activeRouteId));
   document.querySelector("#undoPointButton").disabled = routeUnavailable;
   document.querySelector("#clearRouteButton").disabled = routeUnavailable;
+  document.querySelector("#drawMotionButton").disabled = activeRouteId === "QB";
   document.querySelector("#clearRouteButton").textContent = createScreen === "play" && playPathType === "motion"
     ? "Clear Motion"
     : createScreen === "play" && selectedRouteOptionId !== "base"
@@ -3770,10 +3850,11 @@ function updateDrawingGuide(event) {
   let dashed = false;
 
   if (appTab === "create" && boardMode === "draw") {
-    if (createScreen === "play" && activeRouteSide === "offense" && isSkillPosition(activeRouteId)) {
+    if (createScreen === "play" && activeRouteSide === "offense"
+      && isRouteableOffense(activeRouteId)) {
       const start = editorOffensePositions()[activeRouteId];
       const motion = currentMotion(activeRouteId);
-      if (playPathType === "motion") {
+      if (playPathType === "motion" && activeRouteId !== "QB") {
         anchor = motion[motion.length - 1] || start;
         color = "#76d7ff";
         dashed = true;
@@ -3880,9 +3961,9 @@ els.field.addEventListener("click", event => {
   }
   if (appTab !== "create" || boardMode !== "draw") return;
   if (createScreen === "play" && activeRouteSide === "offense") {
-    if (!isSkillPosition(activeRouteId)) return;
+    if (!isRouteableOffense(activeRouteId)) return;
     const point = eventToFieldPoint(event);
-    if (playPathType === "motion") {
+    if (playPathType === "motion" && activeRouteId !== "QB") {
       const motion = currentMotion(activeRouteId);
       const anchor = motion[motion.length - 1] || editorOffensePositions()[activeRouteId];
       motion.push(constrainRoutePoint(point, anchor, event));
@@ -4665,7 +4746,7 @@ function previewMovement(scope) {
     || (scope === "run" && runDefenseMovement)
     || scope === "test";
   const offenseEntries = scope === "play"
-    ? skillPositions.map(position => [position.id, editorOffensePositions()[position.id]])
+    ? routeableOffense.map(position => [position.id, editorOffensePositions()[position.id]])
     : Object.entries(editorOffensePositions());
   const offensePaths = animateOffense
     ? offenseEntries.map(([id, start]) => ({
@@ -5097,7 +5178,8 @@ document.querySelector("#undoPointButton").addEventListener("click", () => {
 document.querySelectorAll(".board-mode-button").forEach(button => {
   button.addEventListener("click", () => {
     boardMode = button.dataset.boardMode;
-    if (boardMode === "draw" && activeRouteSide === "offense" && !isSkillPosition(activeRouteId)) {
+    if (boardMode === "draw" && activeRouteSide === "offense"
+      && !isRouteableOffense(activeRouteId)) {
       activeRouteId = "X";
     }
     dragState = null;
@@ -5135,6 +5217,7 @@ document.querySelector("#drawRouteButton").addEventListener("click", () => {
 });
 
 document.querySelector("#drawMotionButton").addEventListener("click", () => {
+  if (activeRouteId === "QB") return;
   playPathType = "motion";
   render();
 });
