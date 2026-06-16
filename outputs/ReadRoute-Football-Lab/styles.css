@@ -723,6 +723,15 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   gap: 2px;
   border-top: 1px solid #e8eddc;
 }
+.folder-all-plays-option {
+  color: var(--green);
+  background: #f6faee;
+}
+.folder-picker-done-button {
+  justify-content: center;
+  margin: 4px 0 0;
+  width: 100%;
+}
 .folder-other-files {
   margin-top: 5px;
   border-top: 1px solid #e8eddc;
