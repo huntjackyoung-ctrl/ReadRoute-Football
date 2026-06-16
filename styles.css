@@ -667,6 +667,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   gap: 4px;
 }
 .folder-membership-list label {
+  min-height: 24px;
   padding: 5px 7px;
   display: flex;
   align-items: center;
@@ -677,8 +678,11 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .folder-membership-list label:hover { background: #eff7dc; }
 .folder-membership-list input {
-  width: auto;
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
   margin: 0;
+  accent-color: var(--green);
 }
 .folder-picker-heading {
   margin: 3px 5px 6px;
@@ -696,8 +700,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .folder-formation-picker summary {
   padding: 7px 8px;
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  display: flex;
   gap: 8px;
   align-items: center;
   cursor: pointer;
@@ -707,16 +710,30 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   font-weight: 900;
   list-style: none;
 }
+.folder-formation-picker summary input {
+  flex: 0 0 auto;
+  width: 13px;
+  height: 13px;
+  accent-color: var(--green);
+}
+.folder-formation-picker summary span {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .folder-formation-picker summary::-webkit-details-marker,
 .folder-other-files summary::-webkit-details-marker { display: none; }
 .folder-formation-picker summary small {
+  flex: 0 0 auto;
   color: var(--muted);
   font-size: 8px;
   font-weight: 750;
 }
 .folder-formation-picker summary::after {
   content: "+";
-  grid-column: 4;
+  flex: 0 0 auto;
   color: var(--green);
 }
 .folder-formation-picker[open] summary::after { content: "-"; }
