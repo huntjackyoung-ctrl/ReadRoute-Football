@@ -384,6 +384,31 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   color: var(--green);
   font-size: 20px;
 }
+.playbook-tabs {
+  margin: -8px 0 20px;
+  padding: 5px;
+  display: inline-flex;
+  gap: 5px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #f4f1e8;
+}
+.playbook-tab {
+  padding: 9px 18px;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.playbook-tab.active {
+  color: var(--green-dark);
+  background: var(--lime);
+  box-shadow: 0 6px 14px rgba(23,76,53,.14);
+}
 .library-files {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);

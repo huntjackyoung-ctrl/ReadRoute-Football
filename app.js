@@ -158,6 +158,7 @@ let testSessionPlayIds = [];
 let testSessionIndex = -1;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
+let playbookTab = "all";
 const libraryFolderOpenState = new Map();
 const runFolderOpenState = new Map();
 let saveToastTimer = null;
@@ -1345,37 +1346,102 @@ function customFolderBrowserMarkup() {
   `;
 }
 
-function allPlaysFolderMarkup() {
-  const sortedPlays = [...plays].sort((a, b) => {
-    const formationA = formations.find(formation => formation.id === a.formationId)?.name || "";
-    const formationB = formations.find(formation => formation.id === b.formationId)?.name || "";
-    return formationA.localeCompare(formationB) || a.name.localeCompare(b.name);
-  });
-  return `
-    <details class="library-folder all-plays-folder"${libraryFolderOpenAttribute("all-plays")} data-library-folder-state="all-plays">
-      <summary>
-        <span class="library-folder-icon">P</span>
-        <span>All Plays</span>
-        <small>${plays.length} ${plays.length === 1 ? "play" : "plays"}</small>
-      </summary>
-      <div class="library-folder-content">
-        ${sortedPlays.length
-          ? sortedPlays.map(play => {
-              const formationName = formations.find(formation => formation.id === play.formationId)?.name || "No Formation";
-              return `
+function allFilesBrowserMarkup() {
+  const formationFolders = [...formations]
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(formation => {
+      const formationPlays = plays
+        .filter(play => play.formationId === formation.id)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return `
+        <details class="library-folder formation-folder" data-library-folder-state="formation:${formation.id}"${libraryFolderOpenAttribute(`formation:${formation.id}`)}>
+          <summary>
+            <span class="library-folder-icon">F</span>
+            <span>${escapeHtml(formation.name)}</span>
+            <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
+          </summary>
+          <div class="library-folder-actions">
+            <button class="library-action-button" data-edit-formation="${formation.id}">Edit Formation</button>
+            <button class="library-action-button danger" data-delete-formation="${formation.id}" ${formations.length === 1 || formationPlays.length ? "disabled" : ""}>Delete Formation</button>
+          </div>
+          <div class="library-folder-content">
+            ${formationPlays.length
+              ? formationPlays.map(play => `
                 <div class="library-file-row">
                   <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
                     <span class="library-file-icon">P</span>
-                    <span>${escapeHtml(formationName)} / ${escapeHtml(play.name)}</span>
+                    <span>${escapeHtml(play.name)}</span>
                   </button>
                   <button class="library-action-button" data-edit-play="${play.id}">Edit</button>
                   <button class="library-action-button danger" data-delete-play="${play.id}" ${plays.length === 1 ? "disabled" : ""}>Delete</button>
                 </div>
-              `;
-            }).join("")
-          : `<p class="library-empty">No plays saved yet.</p>`}
+              `).join("")
+              : `<p class="library-empty">No plays saved in this formation yet.</p>`}
+          </div>
+        </details>
+      `;
+    }).join("");
+
+  const unassignedPlays = plays
+    .filter(play => !formations.some(formation => formation.id === play.formationId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+
+  return `
+    <section class="all-files-browser">
+      <div class="custom-folder-heading">
+        <div>
+          <p class="eyebrow">Complete library</p>
+          <h3>All Files</h3>
+          <p class="custom-folder-help">Every formation, play, and defense saved in your playbook.</p>
+        </div>
       </div>
-    </details>
+      ${formationFolders || `<p class="library-empty">No formations saved yet.</p>`}
+      ${unassignedPlays.length ? `
+        <details class="library-folder all-plays-folder" data-library-folder-state="unassigned-plays"${libraryFolderOpenAttribute("unassigned-plays")}>
+          <summary>
+            <span class="library-folder-icon">P</span>
+            <span>Plays Without Formation</span>
+            <small>${unassignedPlays.length}</small>
+          </summary>
+          <div class="library-folder-content">
+            ${unassignedPlays.map(play => `
+                <div class="library-file-row">
+                  <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
+                    <span class="library-file-icon">P</span>
+                    <span>${escapeHtml(play.name)}</span>
+                  </button>
+                  <button class="library-action-button" data-edit-play="${play.id}">Edit</button>
+                  <button class="library-action-button danger" data-delete-play="${play.id}" ${plays.length === 1 ? "disabled" : ""}>Delete</button>
+                </div>
+              `).join("")}
+          </div>
+        </details>
+      ` : ""}
+      <details class="library-folder defense-files-folder" data-library-folder-state="defenses"${libraryFolderOpenAttribute("defenses")}>
+        <summary>
+          <span class="library-folder-icon">D</span>
+          <span>Defenses</span>
+          <small>${defenses.length} ${defenses.length === 1 ? "defense" : "defenses"}</small>
+        </summary>
+        <div class="library-folder-content">
+          ${defenses.length
+            ? defenses
+                .slice()
+                .sort((a, b) => a.name.localeCompare(b.name))
+                .map(defense => `
+                  <div class="library-file-row">
+                    <button class="library-file defense-file ${libraryPreview.type === "defense" && libraryPreview.id === defense.id ? "active" : ""}" data-library-defense="${defense.id}">
+                      <span class="library-file-icon">D</span>
+                      <span>${escapeHtml(defense.name)}</span>
+                    </button>
+                    <button class="library-action-button" data-edit-defense="${defense.id}">Edit</button>
+                    <button class="library-action-button danger" data-delete-defense="${defense.id}" ${defenses.length === 1 ? "disabled" : ""}>Delete</button>
+                  </div>
+                `).join("")
+            : `<p class="library-empty">No defenses saved yet.</p>`}
+        </div>
+      </details>
+    </section>
   `;
 }
 
@@ -1439,14 +1505,34 @@ function renderPlaybookLibrary() {
         </div>
       </div>
     </div>
+    <div class="playbook-tabs" role="tablist" aria-label="Playbook sections">
+      <button
+        class="playbook-tab ${playbookTab === "all" ? "active" : ""}"
+        data-playbook-section="all"
+        role="tab"
+        aria-selected="${playbookTab === "all" ? "true" : "false"}"
+      >All Files</button>
+      <button
+        class="playbook-tab ${playbookTab === "folders" ? "active" : ""}"
+        data-playbook-section="folders"
+        role="tab"
+        aria-selected="${playbookTab === "folders" ? "true" : "false"}"
+      >My Folders</button>
+    </div>
     <div class="library-browser">
       <div class="library-files">
-        ${customFolderBrowserMarkup()}
-        ${allPlaysFolderMarkup()}
+        ${playbookTab === "all" ? allFilesBrowserMarkup() : customFolderBrowserMarkup()}
       </div>
       <div class="library-preview">${libraryPreviewMarkup()}</div>
     </div>
   `;
+
+  els.playbookLibrary.querySelectorAll("[data-playbook-section]").forEach(button => {
+    button.addEventListener("click", () => {
+      playbookTab = button.dataset.playbookSection;
+      renderPlaybookLibrary();
+    });
+  });
 
   els.playbookLibrary.querySelectorAll("[data-library-play]").forEach(button => {
     button.addEventListener("click", () => {
