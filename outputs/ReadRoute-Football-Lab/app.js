@@ -1146,7 +1146,7 @@ function updateFormationPickerState(input) {
   const playInputs = [...group.querySelectorAll("[data-folder-membership][data-membership-item^='play:']")];
   const selectedCount = playInputs.filter(playInput => playInput.checked).length;
   const allPlaysInput = group.querySelector("[data-folder-formation-plays-membership]");
-  const count = group.querySelector("summary small");
+  const count = group.querySelector(".folder-formation-picker-header small");
   if (allPlaysInput) {
     allPlaysInput.checked = playInputs.length > 0 && selectedCount === playInputs.length;
     allPlaysInput.indeterminate = selectedCount > 0 && selectedCount < playInputs.length;
@@ -1206,47 +1206,48 @@ function folderPlayPickerMarkup(folderId) {
     ).length;
     const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
     return `
-      <details class="folder-formation-picker">
-        <summary>
-          <input
-            type="checkbox"
-            data-folder-membership="${folderId}"
-            data-membership-item="${formationKey}"
-            ${formationSelected ? "checked" : ""}
-            aria-label="Add ${escapeHtml(formation.name)} formation"
-          >
-          <span>${escapeHtml(formation.name)}</span>
-          <small>${selectedCount}/${formationPlays.length} selected</small>
-        </summary>
-        <div class="folder-formation-play-list">
-          ${formationPlays.length
-            ? `
-              <label class="folder-all-plays-option">
-                <input
-                  type="checkbox"
-                  data-folder-formation-plays-membership="${folderId}"
-                  data-membership-formation="${formation.id}"
-                  ${allSelected ? "checked" : ""}
-                >
-                <span>All plays in ${escapeHtml(formation.name)}</span>
-              </label>
-              ${formationPlays.map(play => {
-                const key = libraryItemKey("play", play.id);
-                return `
-                  <label>
-                    <input
-                      type="checkbox"
-                      data-folder-membership="${folderId}"
-                      data-membership-item="${key}"
-                      ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
-                    >
-                    <span>${escapeHtml(play.name)}</span>
-                  </label>
-                `;
-              }).join("")}`
-            : `<p class="library-empty">No plays saved for this formation.</p>`}
+      <div class="folder-formation-picker">
+        <div class="folder-formation-picker-header">
+          <label class="folder-formation-name-option">
+            <input
+              type="checkbox"
+              data-folder-membership="${folderId}"
+              data-membership-item="${formationKey}"
+              ${formationSelected ? "checked" : ""}
+              aria-label="Add ${escapeHtml(formation.name)} formation"
+            >
+            <span>${escapeHtml(formation.name)}</span>
+          </label>
+          <small>${selectedCount}/${formationPlays.length} plays selected</small>
         </div>
-      </details>
+        <div class="folder-formation-play-list">
+          ${formationPlays.length ? `
+            <label class="folder-all-plays-option">
+              <input
+                type="checkbox"
+                data-folder-formation-plays-membership="${folderId}"
+                data-membership-formation="${formation.id}"
+                ${allSelected ? "checked" : ""}
+              >
+              <span>All plays in ${escapeHtml(formation.name)}</span>
+            </label>
+            ${formationPlays.map(play => {
+              const key = libraryItemKey("play", play.id);
+              return `
+                <label>
+                  <input
+                    type="checkbox"
+                    data-folder-membership="${folderId}"
+                    data-membership-item="${key}"
+                    ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
+                  >
+                  <span>${escapeHtml(play.name)}</span>
+                </label>
+              `;
+            }).join("")}
+          ` : `<p class="library-empty">No plays saved for this formation. You can still add the formation above.</p>`}
+        </div>
+      </div>
     `;
   }).join("");
 
@@ -1265,8 +1266,8 @@ function folderPlayPickerMarkup(folderId) {
         <p class="folder-picker-heading">Plays by formation</p>
         ${formationGroups || `<p class="library-empty">No formations saved yet.</p>`}
         ${otherItems.length ? `
-          <details class="folder-other-files">
-            <summary>Defenses</summary>
+          <div class="folder-other-files">
+            <p class="folder-picker-heading">Defenses</p>
             <div class="folder-other-file-list">
               ${otherItems.map(item => {
                 const key = libraryItemKey(item.type, item.id);
@@ -1283,7 +1284,7 @@ function folderPlayPickerMarkup(folderId) {
                 `;
               }).join("")}
             </div>
-          </details>
+          </div>
         ` : ""}
       </div>
       <div class="folder-picker-footer">
@@ -1292,7 +1293,6 @@ function folderPlayPickerMarkup(folderId) {
     </div>
   `;
 }
-
 function customFolderMarkup(folder, depth = 0) {
   const children = libraryFolders
     .filter(candidate => candidate.parentId === folder.id)
