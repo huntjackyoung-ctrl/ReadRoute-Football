@@ -7,17 +7,20 @@ const skillPositions = [
 ];
 
 const offensiveLine = [
-  { id: "LT", label: "LT", x: 370, y: 489 },
-  { id: "LG", label: "LG", x: 410, y: 489 },
-  { id: "C", label: "C", x: 450, y: 489 },
-  { id: "RG", label: "RG", x: 490, y: 489 },
-  { id: "RT", label: "RT", x: 530, y: 489 },
+  { id: "LT", label: "LT", x: 370, y: 476 },
+  { id: "LG", label: "LG", x: 410, y: 476 },
+  { id: "C", label: "C", x: 450, y: 476 },
+  { id: "RG", label: "RG", x: 490, y: 476 },
+  { id: "RT", label: "RT", x: 530, y: 476 },
 ];
 
 const quarterback = { id: "QB", label: "QB", x: 450, y: 540 };
 const routeableOffense = [...skillPositions, quarterback];
 const defensePositionLabels = ["DE", "DT", "DT", "DE", "OLB", "MLB", "OLB", "CB", "FS", "SS", "CB"];
 const lineOfScrimmage = 476;
+const fieldWidth = 900;
+const fieldHeight = 700;
+const fieldPadding = 18;
 const scrimmageSnapDistance = 16;
 const storageKeys = {
   plays: "readroute-drawn-plays",
@@ -54,6 +57,24 @@ function defaultOffensePositions() {
     positions[player.id] = { x: player.x, y: player.y };
     return positions;
   }, {});
+}
+
+function keepOffensiveLineOnScrimmage(positions = {}) {
+  offensiveLine.forEach(lineman => {
+    const saved = positions[lineman.id] || lineman;
+    positions[lineman.id] = {
+      x: Number(saved.x) || lineman.x,
+      y: lineOfScrimmage
+    };
+  });
+  return positions;
+}
+
+function normalizedOffensePositions(saved = {}) {
+  return keepOffensiveLineOnScrimmage({
+    ...defaultOffensePositions(),
+    ...(saved || {})
+  });
 }
 
 function defaultDefensePositions() {
@@ -291,10 +312,7 @@ function normalizePlay(play) {
       motions[position.id] = normalizePath(savedMotion);
       return motions;
     }, {}),
-    offensePositions: {
-      ...defaultOffensePositions(),
-      ...(play.offensePositions || {})
-    },
+    offensePositions: normalizedOffensePositions(play.offensePositions),
     formationId: play.formationId || null,
     notes: Array.isArray(play.notes) ? play.notes : [],
     legacyDefensePositions: play.defensePositions || {},
@@ -312,7 +330,7 @@ function loadFormations() {
     return recovered.map(formation => ({
       ...formation,
       labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
-      offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
+      offensePositions: normalizedOffensePositions(formation.offensePositions),
       notes: Array.isArray(formation.notes) ? formation.notes : []
     }));
   }
@@ -580,7 +598,7 @@ function isRunLikeMode() {
 
 function createRunScenario() {
   return {
-    offensePositions: structuredClone(currentPlay().offensePositions),
+    offensePositions: structuredClone(normalizedOffensePositions(currentPlay().offensePositions)),
     offenseRoutes: routeableOffense.reduce((routes, position) => {
       routes[position.id] = structuredClone(
         isSkillPosition(position.id)
@@ -836,6 +854,16 @@ function isRouteableOffense(id) {
   return isSkillPosition(id) || id === "QB";
 }
 
+function isOffensiveLineman(id) {
+  return offensiveLine.some(lineman => lineman.id === id);
+}
+
+function constrainOffenseStartPoint(id, point) {
+  return isOffensiveLineman(id)
+    ? { ...point, y: lineOfScrimmage }
+    : point;
+}
+
 function snapPlayerToScrimmage(point, event) {
   const shouldSnap = !event.altKey
     && Math.abs(point.y - lineOfScrimmage) <= scrimmageSnapDistance;
@@ -875,12 +903,12 @@ function renderMarkings() {
   const numberLeft = standard.numberCenterFromSidelineFeet * pixelsPerFoot;
   const numberRight = 900 - numberLeft;
 
-  els.markings.append(svgEl("line", { x1: 2, y1: 0, x2: 2, y2: 620, stroke: "rgba(255,255,255,.8)", "stroke-width": 4 }));
-  els.markings.append(svgEl("line", { x1: 898, y1: 0, x2: 898, y2: 620, stroke: "rgba(255,255,255,.8)", "stroke-width": 4 }));
+  els.markings.append(svgEl("line", { x1: 2, y1: 0, x2: 2, y2: fieldHeight, stroke: "rgba(255,255,255,.8)", "stroke-width": 4 }));
+  els.markings.append(svgEl("line", { x1: 898, y1: 0, x2: 898, y2: fieldHeight, stroke: "rgba(255,255,255,.8)", "stroke-width": 4 }));
 
-  for (let yard = -8; yard <= 32; yard += 1) {
+  for (let yard = -13; yard <= 32; yard += 1) {
     const y = lineOfScrimmage - (yard * pixelsPerYard);
-    if (y < 0 || y > 620) continue;
+    if (y < 0 || y > fieldHeight) continue;
     const isFive = yard % 5 === 0;
     els.markings.append(svgEl("line", {
       x1: isFive ? 0 : 9,
@@ -1311,6 +1339,40 @@ function customFolderBrowserMarkup() {
   `;
 }
 
+function allPlaysFolderMarkup() {
+  const sortedPlays = [...plays].sort((a, b) => {
+    const formationA = formations.find(formation => formation.id === a.formationId)?.name || "";
+    const formationB = formations.find(formation => formation.id === b.formationId)?.name || "";
+    return formationA.localeCompare(formationB) || a.name.localeCompare(b.name);
+  });
+  return `
+    <details class="library-folder all-plays-folder"${libraryFolderOpenAttribute("all-plays")} data-library-folder-state="all-plays">
+      <summary>
+        <span class="library-folder-icon">P</span>
+        <span>All Plays</span>
+        <small>${plays.length} ${plays.length === 1 ? "play" : "plays"}</small>
+      </summary>
+      <div class="library-folder-content">
+        ${sortedPlays.length
+          ? sortedPlays.map(play => {
+              const formationName = formations.find(formation => formation.id === play.formationId)?.name || "No Formation";
+              return `
+                <div class="library-file-row">
+                  <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
+                    <span class="library-file-icon">P</span>
+                    <span>${escapeHtml(formationName)} / ${escapeHtml(play.name)}</span>
+                  </button>
+                  <button class="library-action-button" data-edit-play="${play.id}">Edit</button>
+                  <button class="library-action-button danger" data-delete-play="${play.id}" ${plays.length === 1 ? "disabled" : ""}>Delete</button>
+                </div>
+              `;
+            }).join("")
+          : `<p class="library-empty">No plays saved yet.</p>`}
+      </div>
+    </details>
+  `;
+}
+
 function selectLibraryPreview(type, id) {
   const pageScroll = {
     x: window.scrollX,
@@ -1342,48 +1404,6 @@ function selectLibraryPreview(type, id) {
 
 function renderPlaybookLibrary() {
   rememberLibraryFolderState();
-  const formationFolders = formations.map(formation => {
-    const formationPlays = plays.filter(play => play.formationId === formation.id);
-    return `
-      <details class="library-folder"${libraryFolderOpenAttribute(`formation:${formation.id}`)} data-library-folder-state="formation:${formation.id}">
-        <summary>
-          <span class="library-folder-icon">F</span>
-          <span>${escapeHtml(formation.name)}</span>
-          <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
-        </summary>
-        <div class="library-folder-content">
-          <div class="library-folder-actions">
-            <button class="library-action-button" data-edit-formation="${formation.id}">Edit Formation</button>
-            <button class="library-action-button danger" data-delete-formation="${formation.id}" ${formations.length === 1 || formationPlays.length ? "disabled" : ""} title="${formationPlays.length ? "Delete this formation's plays first" : "Delete formation"}">Delete</button>
-          </div>
-          ${formationPlays.length
-            ? formationPlays.map(play => `
-              <div class="library-file-row">
-                <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
-                  <span class="library-file-icon">P</span>
-                  <span>${escapeHtml(play.name)}</span>
-                </button>
-                <button class="library-action-button" data-edit-play="${play.id}">Edit</button>
-                <button class="library-action-button danger" data-delete-play="${play.id}" ${plays.length === 1 ? "disabled" : ""}>Delete</button>
-              </div>
-            `).join("")
-            : `<p class="library-empty">No plays saved for this formation.</p>`}
-        </div>
-      </details>
-    `;
-  }).join("");
-
-  const defenseFiles = defenses.map(defense => `
-    <div class="library-file-row">
-      <button class="library-file defense-file ${libraryPreview.type === "defense" && libraryPreview.id === defense.id ? "active" : ""}" data-library-defense="${defense.id}">
-        <span class="library-file-icon">D</span>
-        <span>${escapeHtml(defense.name)}</span>
-      </button>
-      <button class="library-action-button" data-edit-defense="${defense.id}">Edit</button>
-      <button class="library-action-button danger" data-delete-defense="${defense.id}" ${defenses.length === 1 ? "disabled" : ""}>Delete</button>
-    </div>
-  `).join("");
-
   els.playbookLibrary.innerHTML = `
     <div class="library-heading">
       <div>
@@ -1415,22 +1435,8 @@ function renderPlaybookLibrary() {
     </div>
     <div class="library-browser">
       <div class="library-files">
+        ${allPlaysFolderMarkup()}
         ${customFolderBrowserMarkup()}
-        <div class="library-column">
-          <p class="eyebrow">Offense</p>
-          ${formationFolders}
-        </div>
-        <div class="library-column">
-          <p class="eyebrow">Defense</p>
-          <details class="library-folder defense-folder"${libraryFolderOpenAttribute("defenses")} data-library-folder-state="defenses">
-            <summary>
-              <span class="library-folder-icon">D</span>
-              <span>Defenses</span>
-              <small>${defenses.length}</small>
-            </summary>
-            <div class="library-folder-content">${defenseFiles}</div>
-          </details>
-        </div>
       </div>
       <div class="library-preview">${libraryPreviewMarkup()}</div>
     </div>
@@ -1682,7 +1688,12 @@ function restorePreviousBackup() {
     : "previously"}? Your current playbook will remain as the newest recovery snapshot.`)) return;
   const current = JSON.stringify(playbookSnapshot());
   localStorage.setItem(storageKeys.previousSnapshot, current);
-  formations = backup.formations;
+  formations = backup.formations.map(formation => ({
+    ...formation,
+    labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
+    offensePositions: normalizedOffensePositions(formation.offensePositions),
+    notes: Array.isArray(formation.notes) ? formation.notes : []
+  }));
   plays = backup.plays.map(normalizePlay);
   defenses = backup.defenses.map(normalizeDefense);
   libraryFolders = Array.isArray(backup.libraryFolders) ? backup.libraryFolders : [];
@@ -1713,7 +1724,7 @@ async function importPlaybook(event) {
     formations = data.formations.map(formation => ({
       ...formation,
       labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
-      offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
+      offensePositions: normalizedOffensePositions(formation.offensePositions),
       notes: Array.isArray(formation.notes) ? formation.notes : []
     }));
     plays = data.plays.map(normalizePlay);
@@ -1858,13 +1869,13 @@ function libraryFieldMarkingsMarkup() {
   const numberLeft = standard.numberCenterFromSidelineFeet * pixelsPerFoot;
   const numberRight = 900 - numberLeft;
   const markings = [
-    `<line x1="2" y1="0" x2="2" y2="620" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`,
-    `<line x1="898" y1="0" x2="898" y2="620" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`
+    `<line x1="2" y1="0" x2="2" y2="${fieldHeight}" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`,
+    `<line x1="898" y1="0" x2="898" y2="${fieldHeight}" stroke="rgba(255,255,255,.8)" stroke-width="4"></line>`
   ];
 
-  for (let yard = -8; yard <= 32; yard += 1) {
+  for (let yard = -13; yard <= 32; yard += 1) {
     const y = lineOfScrimmage - (yard * pixelsPerYard);
-    if (y < 0 || y > 620) continue;
+    if (y < 0 || y > fieldHeight) continue;
     const isFive = yard % 5 === 0;
     markings.push(`
       <line x1="${isFive ? 0 : 9}" y1="${y}" x2="${isFive ? 900 : 891}" y2="${y}" stroke="rgba(255,255,255,${isFive ? ".30" : ".11"})" stroke-width="${isFive ? 2 : 1}"></line>
@@ -2001,8 +2012,8 @@ function libraryPreviewMarkup() {
     : [...(formation.notes || []), ...(item.notes || [])];
   const notesMarkup = notes.map(note => {
     const dimensions = noteDimensions(note.text);
-    const x = Math.max(6, Math.min(note.x, 894 - dimensions.width));
-    const y = Math.max(6, Math.min(note.y, 614 - dimensions.height));
+    const x = Math.max(6, Math.min(note.x, fieldWidth - 6 - dimensions.width));
+    const y = Math.max(6, Math.min(note.y, fieldHeight - 6 - dimensions.height));
     return `
       <g transform="translate(${x} ${y})">
         <rect width="${dimensions.width}" height="${dimensions.height}" rx="5" fill="rgba(255,253,247,.96)" stroke="#c9f45c" stroke-width="2"></rect>
@@ -2030,14 +2041,14 @@ function libraryPreviewMarkup() {
       <span class="library-field-standard">${escapeHtml(fieldStandards[fieldStandard].label)} field</span>
     </div>
     <div class="library-field-frame">
-    <svg viewBox="0 0 900 620" aria-label="${escapeHtml(item.name)} preview">
+    <svg viewBox="0 0 ${fieldWidth} ${fieldHeight}" aria-label="${escapeHtml(item.name)} preview">
       <defs>
         <marker id="libraryArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#f2c35a"></path></marker>
         <marker id="libraryMotionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#76d7ff"></path></marker>
         <marker id="libraryDefenseArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#ed7048"></path></marker>
         <marker id="libraryOptionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#c9f45c"></path></marker>
       </defs>
-      <rect width="900" height="620" rx="10" fill="#174c35"></rect>
+      <rect width="${fieldWidth}" height="${fieldHeight}" rx="10" fill="#174c35"></rect>
       ${libraryFieldMarkingsMarkup()}
       ${routeMarkup}${qbRouteMarkup}${optionRouteMarkup}${offenseMarkup}${defenseMarkup}${notesMarkup}
     </svg>
@@ -2490,7 +2501,7 @@ function loadNextTestPlay() {
 function applyFormation(formation) {
   if (!formation) return;
   currentPlay().formationId = formation.id;
-  currentPlay().offensePositions = structuredClone(formation.offensePositions);
+  currentPlay().offensePositions = structuredClone(normalizedOffensePositions(formation.offensePositions));
   currentPlay().labels = structuredClone(formation.labels);
   selectedFormationId = formation.id;
 }
@@ -2511,7 +2522,7 @@ function mirroredPlay(sourcePlay, sourceFormation, targetFormation) {
   const mirrored = createBlankPlay(sourcePlay.name);
   mirrored.formationId = targetFormation.id;
   mirrored.labels = structuredClone(targetFormation.labels);
-  mirrored.offensePositions = structuredClone(targetFormation.offensePositions);
+  mirrored.offensePositions = structuredClone(normalizedOffensePositions(targetFormation.offensePositions));
   mirrored.notes = (sourcePlay.notes || []).map(note => ({
     ...structuredClone(note),
     id: crypto.randomUUID(),
@@ -2551,6 +2562,7 @@ function mirroredFormation(source) {
       x: Math.max(8, 900 - note.x - (note.width || 170))
     }))
   };
+  keepOffensiveLineOnScrimmage(mirrored.offensePositions);
   return mirrored;
 }
 
@@ -3433,8 +3445,8 @@ function renderNotes() {
         const next = noteDimensions(note.text);
         note.width = next.width;
         note.height = next.height;
-        note.x = Math.min(note.x, 900 - next.width - 8);
-        note.y = Math.min(note.y, 620 - next.height - 8);
+        note.x = Math.min(note.x, fieldWidth - next.width - 8);
+        note.y = Math.min(note.y, fieldHeight - next.height - 8);
         group.setAttribute("transform", `translate(${note.x} ${note.y})`);
         background.setAttribute("width", next.width);
         background.setAttribute("height", next.height);
@@ -3784,7 +3796,7 @@ document.querySelector("#newPlayButton").addEventListener("click", () => {
   });
   draftPlay = createBlankPlay("");
   draftPlay.formationId = selectedFormationId;
-  draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
+  draftPlay.offensePositions = structuredClone(normalizedOffensePositions(currentFormation().offensePositions));
   draftPlay.labels = structuredClone(currentFormation().labels);
   emptyPlayPaths(draftPlay);
   activeRouteId = "X";
@@ -3804,8 +3816,8 @@ function eventToFieldPoint(event) {
   point.y = event.clientY;
   const transformed = point.matrixTransform(els.field.getScreenCTM().inverse());
   return {
-    x: Math.max(18, Math.min(882, Math.round(transformed.x))),
-    y: Math.max(18, Math.min(602, Math.round(transformed.y))),
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, Math.round(transformed.x))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, Math.round(transformed.y))),
     rounded: false,
     speed: 1
   };
@@ -3927,7 +3939,7 @@ els.field.addEventListener("click", event => {
     currentZoneAssignments()[activeRouteId] = {
       ...existingZone,
       x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
-      y: Math.max(radii.y, Math.min(620 - radii.y, point.y)),
+      y: Math.max(radii.y, Math.min(fieldHeight - radii.y, point.y)),
       radiusX: radii.x,
       radiusY: radii.y
     };
@@ -4024,7 +4036,7 @@ els.field.addEventListener("click", event => {
     currentDefense().zoneAssignments[activeRouteId] = {
       ...existingZone,
       x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
-      y: Math.max(radii.y, Math.min(620 - radii.y, point.y)),
+      y: Math.max(radii.y, Math.min(fieldHeight - radii.y, point.y)),
       radiusX: radii.x,
       radiusY: radii.y
     };
@@ -4057,7 +4069,7 @@ els.field.addEventListener("pointermove", event => {
     );
     dragState.zone.y = Math.max(
       radii.y,
-      Math.min(620 - radii.y, point.y - dragState.offsetY)
+      Math.min(fieldHeight - radii.y, point.y - dragState.offsetY)
     );
     renderDefense();
     return;
@@ -4111,7 +4123,7 @@ els.field.addEventListener("pointermove", event => {
   }
   if (dragState.side === "note") {
     const maxX = 900 - (dragState.note.width || 170) - 8;
-    const maxY = 620 - (dragState.note.height || 62) - 8;
+    const maxY = fieldHeight - (dragState.note.height || 62) - 8;
     dragState.note.x = Math.max(8, Math.min(maxX, point.x - dragState.offsetX));
     dragState.note.y = Math.max(8, Math.min(maxY, point.y - dragState.offsetY));
     renderNotes();
@@ -4119,10 +4131,14 @@ els.field.addEventListener("pointermove", event => {
   }
   if (appTab === "run") {
     if (!scenarioEditing || scenarioTool !== "move") return;
-    const playerPoint = snapPlayerToScrimmage(point, event);
     if (dragState.side === "offense") {
+      const playerPoint = constrainOffenseStartPoint(
+        dragState.id,
+        snapPlayerToScrimmage(point, event)
+      );
       runScenario.offensePositions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     } else {
+      const playerPoint = snapPlayerToScrimmage(point, event);
       runScenario.defensePositions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     }
     renderRoutesAndPlayers();
@@ -4134,14 +4150,18 @@ els.field.addEventListener("pointermove", event => {
     && dragState.side === "offense"
     && dragState.id === "RB";
   if (boardMode !== "move" && !playSpecificRunningBack) return;
-  const playerPoint = snapPlayerToScrimmage(point, event);
   if (dragState.side === "offense") {
+    const playerPoint = constrainOffenseStartPoint(
+      dragState.id,
+      snapPlayerToScrimmage(point, event)
+    );
     const positions = playSpecificRunningBack
       ? currentPlay().offensePositions
       : currentFormation().offensePositions;
     positions[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     renderRoutesAndPlayers();
   } else {
+    const playerPoint = snapPlayerToScrimmage(point, event);
     currentDefenseEditorPositions()[dragState.id] = { x: playerPoint.x, y: playerPoint.y };
     renderDefense();
   }
@@ -4529,8 +4549,8 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   state.vy += (desiredVy - state.vy) * velocityRatio;
   state.x += state.vx * safeDelta;
   state.y += state.vy * safeDelta;
-  state.x = Math.max(18, Math.min(882, state.x));
-  state.y = Math.max(18, Math.min(602, state.y));
+  state.x = Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, state.x));
+  state.y = Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, state.y));
   if (state.phase !== "drive" && state.y > state.start.y) {
     state.y = state.start.y;
     state.vy = Math.min(0, state.vy);
@@ -4702,8 +4722,8 @@ function moveZoneDefender(
     : 0;
   state.x += proposedDx * frameRatio;
   state.y += proposedDy * frameRatio;
-  state.x = Math.max(18, Math.min(882, state.x));
-  state.y = Math.max(18, Math.min(602, state.y));
+  state.x = Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, state.x));
+  state.y = Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, state.y));
   if (isDeepSafety && state.y > deepThreatLine) {
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
@@ -5451,7 +5471,7 @@ document.querySelectorAll("[data-app-tab]").forEach(button => {
       if (!draftPlay) {
         draftPlay = createBlankPlay("");
         draftPlay.formationId = selectedFormationId;
-        draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
+        draftPlay.offensePositions = structuredClone(normalizedOffensePositions(currentFormation().offensePositions));
         draftPlay.labels = structuredClone(currentFormation().labels);
         emptyPlayPaths(draftPlay);
       }
@@ -5482,7 +5502,7 @@ document.querySelectorAll("[data-create-screen]").forEach(button => {
       if (!draftPlay) {
         draftPlay = createBlankPlay("");
         draftPlay.formationId = selectedFormationId;
-        draftPlay.offensePositions = structuredClone(currentFormation().offensePositions);
+        draftPlay.offensePositions = structuredClone(normalizedOffensePositions(currentFormation().offensePositions));
         draftPlay.labels = structuredClone(currentFormation().labels);
         emptyPlayPaths(draftPlay);
       }
@@ -5580,7 +5600,7 @@ function applySharedPlaybook(snapshot) {
   formations = snapshot.formations.map(formation => ({
     ...formation,
     labels: formation.labels || { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
-    offensePositions: { ...defaultOffensePositions(), ...(formation.offensePositions || {}) },
+    offensePositions: normalizedOffensePositions(formation.offensePositions),
     notes: Array.isArray(formation.notes) ? formation.notes : []
   }));
   plays = snapshot.plays.map(normalizePlay);
