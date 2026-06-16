@@ -656,12 +656,15 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .folder-membership-editor summary::-webkit-details-marker { display: none; }
 .folder-membership-list {
-  max-height: 360px;
+  display: grid;
+  background: #fff;
+}
+.folder-picker-scroll {
+  max-height: 315px;
   padding: 7px;
   overflow-y: auto;
   display: grid;
   gap: 4px;
-  background: #fff;
 }
 .folder-membership-list label {
   padding: 5px 7px;
@@ -729,8 +732,12 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .folder-picker-done-button {
   justify-content: center;
-  margin: 4px 0 0;
   width: 100%;
+}
+.folder-picker-footer {
+  padding: 7px;
+  border-top: 1px solid #e8eddc;
+  background: #f8fbf1;
 }
 .folder-other-files {
   margin-top: 5px;

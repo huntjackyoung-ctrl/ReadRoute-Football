@@ -1163,7 +1163,7 @@ function rememberLibraryFolderState() {
 }
 
 function libraryFolderOpenAttribute(key) {
-  return libraryFolderOpenState.get(key) === false ? "" : " open";
+  return libraryFolderOpenState.get(key) === true ? " open" : "";
 }
 
 function customLibraryFileMarkup(item, folderId) {
@@ -1261,30 +1261,34 @@ function folderPlayPickerMarkup(folderId) {
 
   return `
     <div class="folder-membership-list">
-      <p class="folder-picker-heading">Plays by formation</p>
-      ${formationGroups || `<p class="library-empty">No formations saved yet.</p>`}
-      ${otherItems.length ? `
-        <details class="folder-other-files">
-          <summary>Defenses</summary>
-          <div class="folder-other-file-list">
-            ${otherItems.map(item => {
-              const key = libraryItemKey(item.type, item.id);
-              return `
-                <label>
-                  <input
-                    type="checkbox"
-                    data-folder-membership="${folderId}"
-                    data-membership-item="${key}"
-                    ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
-                  >
-                  <span>${item.icon} - ${escapeHtml(item.name)}</span>
-                </label>
-              `;
-            }).join("")}
-          </div>
-        </details>
-      ` : ""}
-      <button class="library-action-button folder-picker-done-button" data-close-folder-picker>Done</button>
+      <div class="folder-picker-scroll">
+        <p class="folder-picker-heading">Plays by formation</p>
+        ${formationGroups || `<p class="library-empty">No formations saved yet.</p>`}
+        ${otherItems.length ? `
+          <details class="folder-other-files">
+            <summary>Defenses</summary>
+            <div class="folder-other-file-list">
+              ${otherItems.map(item => {
+                const key = libraryItemKey(item.type, item.id);
+                return `
+                  <label>
+                    <input
+                      type="checkbox"
+                      data-folder-membership="${folderId}"
+                      data-membership-item="${key}"
+                      ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
+                    >
+                    <span>${item.icon} - ${escapeHtml(item.name)}</span>
+                  </label>
+                `;
+              }).join("")}
+            </div>
+          </details>
+        ` : ""}
+      </div>
+      <div class="folder-picker-footer">
+        <button class="library-action-button folder-picker-done-button" data-close-folder-picker>Done</button>
+      </div>
     </div>
   `;
 }
