@@ -257,6 +257,7 @@ const els = {
   routeOptionDefense: document.querySelector("#routeOptionDefense"),
   allRouteOptions: document.querySelector("#allRouteOptions"),
   trenchesFrontSelect: document.querySelector("#trenchesFrontSelect"),
+  trenchesFrontSelectMirror: document.querySelector("#trenchesFrontSelectMirror"),
   trenchesFrontName: document.querySelector("#trenchesFrontName"),
   trenchesPlayName: document.querySelector("#trenchesPlayName"),
   trenchesPlaySelect: document.querySelector("#trenchesPlaySelect"),
@@ -267,8 +268,11 @@ const els = {
   deleteTrenchesFrontButton: document.querySelector("#deleteTrenchesFrontButton"),
   addTrenchesOffenseButton: document.querySelector("#addTrenchesOffenseButton"),
   addTrenchesDefenderButton: document.querySelector("#addTrenchesDefenderButton"),
+  addTrenchesFrontDefenderButton: document.querySelector("#addTrenchesFrontDefenderButton"),
   undoTrenchesDefensePointButton: document.querySelector("#undoTrenchesDefensePointButton"),
   clearTrenchesDefensePathButton: document.querySelector("#clearTrenchesDefensePathButton"),
+  clearTrenchesOffenseButton: document.querySelector("#clearTrenchesOffenseButton"),
+  clearTrenchesDefenseButton: document.querySelector("#clearTrenchesDefenseButton"),
   trenchesMoveButton: document.querySelector("#trenchesMoveButton"),
   trenchesDrawButton: document.querySelector("#trenchesDrawButton"),
   addTrenchesNoteButton: document.querySelector("#addTrenchesNoteButton"),
@@ -279,6 +283,7 @@ const els = {
   clearTrenchesPathButton: document.querySelector("#clearTrenchesPathButton"),
   trenchesAssignmentsList: document.querySelector("#trenchesAssignmentsList"),
   trenchesDefenderList: document.querySelector("#trenchesDefenderList"),
+  trenchesFrontDefenderList: document.querySelector("#trenchesFrontDefenderList"),
   resetTrenchesButton: document.querySelector("#resetTrenchesButton"),
   runTrenchesButton: document.querySelector("#runTrenchesButton"),
   resetTrenchesPlayButton: document.querySelector("#resetTrenchesPlayButton"),
@@ -367,7 +372,7 @@ function loadTrenchesState() {
       : "starter";
   return {
     mode: saved.mode === "draw" ? "draw" : "move",
-    panelTab: saved.panelTab === "defense" ? "defense" : "offense",
+    panelTab: ["offense", "defense", "front"].includes(saved.panelTab) ? saved.panelTab : "offense",
     playbackSpeed: Number(savedPlay?.playbackSpeed || saved.playbackSpeed) || 1,
     playName: savedPlay?.name || saved.playName || "",
     selectedPlayId,
@@ -3991,6 +3996,28 @@ function deleteCurrentTrenchesFront() {
   showSaveSuccess("Front deleted");
 }
 
+function addTrenchesDefender({ saveTemplate = false } = {}) {
+  resetTrenchesRun();
+  if (saveTemplate && !trenchesState.customFronts?.[trenchesState.frontId]) {
+    const front = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.starter;
+    createCustomTrenchesFront(els.trenchesFrontName?.value?.trim() || `${front.name} Custom`);
+  }
+  const positions = trenchesPositions(trenchesState.frontId);
+  const count = positions.defense.length + 1;
+  const newDefender = {
+    id: `D${crypto.randomUUID().slice(0, 8)}`,
+    label: `D${count}`,
+    x: 450,
+    y: 180
+  };
+  positions.defense.push(newDefender);
+  setTrenchesPositions(trenchesState.frontId, positions);
+  if (saveTemplate) saveCurrentTrenchesFront();
+  updateTrenchesSelection(newDefender.id, "defense");
+  renderTrenches();
+  showSaveSuccess("Defender added");
+}
+
 function saveTrenchesPlayFromState(nameOverride = "") {
   const name = (nameOverride || els.trenchesPlayName?.value || trenchesState.playName || "Untitled Trench Play").trim() || "Untitled Trench Play";
   const play = {
@@ -4103,8 +4130,20 @@ function trenchProgress(progress, speed = 1) {
 
 function trenchPathForPlayer(player, movement = {}, target = null) {
   const path = Array.isArray(movement.path) ? movement.path : [];
+  if (target && path.length) {
+    const last = path[path.length - 1];
+    const targetPoint = { x: target.x, y: target.y, rounded: false };
+    return Math.hypot(last.x - target.x, last.y - target.y) > 8
+      ? [...path, targetPoint]
+      : [...path.slice(0, -1), targetPoint];
+  }
   if (path.length) return path;
   return target ? [{ x: target.x, y: target.y, rounded: false }] : [];
+}
+
+function defenderTrenchDestination(defender) {
+  const path = trenchesState.defensePaths?.[defender.id]?.path || [];
+  return path.length ? path[path.length - 1] : defender;
 }
 
 function trenchTravelPoint(player, path, elapsedMs, speed = 1, engaged = false) {
@@ -4142,10 +4181,15 @@ function renderTrenches() {
     ...trenchesState.plays.map(play => `<option value="${play.id}">${escapeHtml(play.name)}</option>`)
   ].join("");
   els.trenchesPlaySelect.value = trenchesState.selectedPlayId || "";
-  els.trenchesFrontSelect.innerHTML = Object.entries(trenchesFrontOptions())
+  const frontOptionsMarkup = Object.entries(trenchesFrontOptions())
     .map(([id, front]) => `<option value="${id}">${escapeHtml(front.name)}</option>`)
     .join("");
+  els.trenchesFrontSelect.innerHTML = frontOptionsMarkup;
   els.trenchesFrontSelect.value = trenchesState.frontId;
+  if (els.trenchesFrontSelectMirror) {
+    els.trenchesFrontSelectMirror.innerHTML = frontOptionsMarkup;
+    els.trenchesFrontSelectMirror.value = trenchesState.frontId;
+  }
   if (els.trenchesFrontName) {
     const front = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.starter;
     els.trenchesFrontName.value = front.name || "Starter Front";
@@ -4263,14 +4307,15 @@ function renderTrenches() {
         const defender = positions.defense.find(item => item.id === defenderId);
         assignment.targetId = assignment.targetId === defenderId ? "" : defenderId;
         if (assignment.targetId && defender) {
+          const destination = defenderTrenchDestination(defender);
           assignment.path ||= [];
           const last = assignment.path[assignment.path.length - 1];
-          if (!last || Math.hypot(last.x - defender.x, last.y - defender.y) > 8) {
-            assignment.path.push({ x: defender.x, y: defender.y, rounded: false });
+          if (!last || Math.hypot(last.x - destination.x, last.y - destination.y) > 8) {
+            assignment.path.push({ x: destination.x, y: destination.y, rounded: false });
           }
         }
       } else {
-        trenchesState.panelTab = "defense";
+        trenchesState.panelTab = trenchesState.panelTab === "front" ? "front" : "defense";
         updateTrenchesSelection(node.dataset.trenchesDefender, "defense");
       }
       saveTrenchesState();
@@ -4307,16 +4352,27 @@ function renderTrenches() {
   els.trenchesAssignmentsList.innerHTML = ol.map(lineman => {
     const assignment = trenchesState.assignments[lineman.id];
     return `
-      <button class="trenches-assignment-chip ${trenchesState.selectedSide === "offense" && trenchesState.selectedId === lineman.id ? "active" : ""}" data-trenches-select="${lineman.id}">
-        <strong>${escapeHtml(lineman.label || lineman.id)}</strong>
+      <div class="trenches-assignment-chip ${trenchesState.selectedSide === "offense" && trenchesState.selectedId === lineman.id ? "active" : ""}" data-trenches-select="${lineman.id}">
+        <input type="text" maxlength="8" value="${escapeHtml(lineman.label || lineman.id)}" data-trenches-off-label="${lineman.id}" aria-label="Offensive player label">
         <span>${(assignment?.path || []).length} path pts${assignment?.targetId ? " | target locked" : ""}</span>
         ${baseOffenseIds.has(lineman.id) ? "" : `<span class="trenches-delete-inline" data-delete-trenches-offense="${lineman.id}">Delete</span>`}
-      </button>
+      </div>
     `;
   }).join("");
   els.trenchesAssignmentsList.querySelectorAll("[data-trenches-select]").forEach(button => {
     button.addEventListener("click", () => {
       updateTrenchesSelection(button.dataset.trenchesSelect, "offense");
+      renderTrenches();
+    });
+  });
+  els.trenchesAssignmentsList.querySelectorAll("[data-trenches-off-label]").forEach(input => {
+    input.addEventListener("click", event => event.stopPropagation());
+    input.addEventListener("change", () => {
+      const positions = trenchesPositions(trenchesState.frontId);
+      const player = positions.offense.find(item => item.id === input.dataset.trenchesOffLabel);
+      if (!player) return;
+      player.label = input.value.trim() || player.label;
+      setTrenchesPositions(trenchesState.frontId, positions);
       renderTrenches();
     });
   });
@@ -4345,24 +4401,16 @@ function renderTrenches() {
   });
   els.trenchesDefenderList.querySelectorAll("[data-trenches-def-label]").forEach(input => {
     input.addEventListener("change", () => {
-      const frontId = editableTrenchesFrontId();
-      if (!frontId) {
-        renderTrenches();
-        return;
-      }
       const positions = trenchesPositions(trenchesState.frontId);
       const defender = positions.defense.find(item => item.id === input.dataset.trenchesDefLabel);
       if (!defender) return;
       defender.label = input.value.trim() || defender.label;
       setTrenchesPositions(trenchesState.frontId, positions);
-      saveCurrentTrenchesFront();
       renderTrenches();
     });
   });
   els.trenchesDefenderList.querySelectorAll("[data-delete-trenches-defender]").forEach(button => {
     button.addEventListener("click", () => {
-      const frontId = editableTrenchesFrontId();
-      if (!frontId) return;
       const defenderId = button.dataset.deleteTrenchesDefender;
       const positions = trenchesPositions(trenchesState.frontId);
       positions.defense = positions.defense.filter(item => item.id !== defenderId);
@@ -4375,10 +4423,51 @@ function renderTrenches() {
         trenchesState.selectedSide = "offense";
         trenchesState.selectedId = "LT";
       }
-      saveCurrentTrenchesFront();
+      saveTrenchesState();
       renderTrenches();
     });
   });
+
+  if (els.trenchesFrontDefenderList) {
+    els.trenchesFrontDefenderList.innerHTML = currentPositions.defense.map(defender => `
+      <div class="trenches-defender-row ${trenchesState.selectedSide === "defense" && trenchesState.selectedId === defender.id ? "active" : ""}">
+        <input type="text" maxlength="8" value="${escapeHtml(defender.label)}" data-trenches-front-def-label="${defender.id}" aria-label="Template defender label">
+        <button class="library-action-button" data-select-trenches-front-defender="${defender.id}">Select</button>
+        <button class="library-action-button danger" data-delete-trenches-front-defender="${defender.id}">Delete</button>
+      </div>
+    `).join("");
+    els.trenchesFrontDefenderList.querySelectorAll("[data-select-trenches-front-defender]").forEach(button => {
+      button.addEventListener("click", () => {
+        trenchesState.panelTab = "front";
+        updateTrenchesSelection(button.dataset.selectTrenchesFrontDefender, "defense");
+        renderTrenches();
+      });
+    });
+    els.trenchesFrontDefenderList.querySelectorAll("[data-trenches-front-def-label]").forEach(input => {
+      input.addEventListener("change", () => {
+        editableTrenchesFrontId();
+        const positions = trenchesPositions(trenchesState.frontId);
+        const defender = positions.defense.find(item => item.id === input.dataset.trenchesFrontDefLabel);
+        if (!defender) return;
+        defender.label = input.value.trim() || defender.label;
+        setTrenchesPositions(trenchesState.frontId, positions);
+        saveCurrentTrenchesFront();
+        renderTrenches();
+      });
+    });
+    els.trenchesFrontDefenderList.querySelectorAll("[data-delete-trenches-front-defender]").forEach(button => {
+      button.addEventListener("click", () => {
+        editableTrenchesFrontId();
+        const defenderId = button.dataset.deleteTrenchesFrontDefender;
+        const positions = trenchesPositions(trenchesState.frontId);
+        positions.defense = positions.defense.filter(item => item.id !== defenderId);
+        setTrenchesPositions(trenchesState.frontId, positions);
+        delete trenchesState.defensePaths?.[defenderId];
+        saveCurrentTrenchesFront();
+        renderTrenches();
+      });
+    });
+  }
 
   els.trenchesBoard.querySelectorAll("[data-trenches-note-handle]").forEach(button => {
     button.addEventListener("pointerdown", event => startTrenchesNoteDrag(event, button.dataset.trenchesNoteHandle));
@@ -4414,12 +4503,17 @@ function renderTrenches() {
 
 function startTrenchesDrag(event, side, id) {
   if (trenchesAnimationFrame) return;
-  if (trenchesState.mode === "draw" && side !== "offense") return;
+  if (trenchesState.mode === "draw" && side === "defense" && !["defense", "front"].includes(trenchesState.panelTab)) return;
   event.preventDefault();
   event.stopPropagation();
   if (side === "offense") updateTrenchesSelection(id);
   if (side === "offense" && trenchesState.mode === "draw") return;
-  if (side === "defense" && !trenchesState.customFronts?.[trenchesState.frontId]) {
+  if (side === "defense" && trenchesState.mode === "draw") {
+    trenchesState.panelTab = trenchesState.panelTab === "front" ? "front" : "defense";
+    updateTrenchesSelection(id, "defense");
+    return;
+  }
+  if (side === "defense" && trenchesState.panelTab === "front" && !trenchesState.customFronts?.[trenchesState.frontId]) {
     const frontId = editableTrenchesFrontId();
     if (!frontId) return;
   }
@@ -4491,6 +4585,9 @@ function finishTrenchesDrag(event) {
   if (svg?.hasPointerCapture(trenchesDrag.pointerId)) {
     svg.releasePointerCapture(trenchesDrag.pointerId);
   }
+  if (trenchesDrag.side === "defense" && trenchesState.panelTab === "front") {
+    saveCurrentTrenchesFront();
+  }
   trenchesDrag = null;
   renderTrenches();
 }
@@ -4501,7 +4598,7 @@ function runTrenchesPlay() {
   const offenseDurations = start.offense.map(player => {
     const assignment = trenchesState.assignments[player.id] || {};
     const target = start.defense.find(defender => defender.id === assignment.targetId);
-    const path = trenchPathForPlayer(player, assignment, target);
+    const path = trenchPathForPlayer(player, assignment, target ? defenderTrenchDestination(target) : null);
     return trenchMovementDurationMs(player, path, playbackSpeed, Boolean(target));
   });
   const defenseDurations = start.defense.map(player => {
@@ -4517,7 +4614,7 @@ function runTrenchesPlay() {
     const offensePositions = start.offense.map(player => {
       const assignment = trenchesState.assignments[player.id] || {};
       const target = start.defense.find(defender => defender.id === assignment.targetId);
-      const path = trenchPathForPlayer(player, assignment, target);
+      const path = trenchPathForPlayer(player, assignment, target ? defenderTrenchDestination(target) : null);
       const contactSoon = target && Math.hypot(player.x - target.x, player.y - target.y) < 75;
       return trenchTravelPoint(player, path, elapsedMs, playbackSpeed, contactSoon && progress > .18);
     });
@@ -6495,6 +6592,11 @@ els.trenchesFrontSelect?.addEventListener("change", event => {
   renderTrenches();
 });
 
+els.trenchesFrontSelectMirror?.addEventListener("change", event => {
+  els.trenchesFrontSelect.value = event.target.value;
+  els.trenchesFrontSelect.dispatchEvent(new Event("change"));
+});
+
 els.trenchesFrontName?.addEventListener("input", () => {
   if (trenchesState.customFronts?.[trenchesState.frontId]) {
     saveCurrentTrenchesFront(els.trenchesFrontName.value);
@@ -6593,27 +6695,8 @@ els.addTrenchesOffenseButton?.addEventListener("click", () => {
   showSaveSuccess("Offensive player added");
 });
 
-els.addTrenchesDefenderButton?.addEventListener("click", () => {
-  resetTrenchesRun();
-  if (!trenchesState.customFronts?.[trenchesState.frontId]) {
-    const front = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.starter;
-    createCustomTrenchesFront(els.trenchesFrontName?.value?.trim() || `${front.name} Custom`);
-  }
-  const positions = trenchesPositions(trenchesState.frontId);
-  const count = positions.defense.length + 1;
-  const newDefender = {
-    id: `D${crypto.randomUUID().slice(0, 8)}`,
-    label: `D${count}`,
-    x: 450,
-    y: 180
-  };
-  positions.defense.push(newDefender);
-  setTrenchesPositions(trenchesState.frontId, positions);
-  saveCurrentTrenchesFront();
-  updateTrenchesSelection(newDefender.id, "defense");
-  renderTrenches();
-  showSaveSuccess("Defender added");
-});
+els.addTrenchesDefenderButton?.addEventListener("click", () => addTrenchesDefender({ saveTemplate: false }));
+els.addTrenchesFrontDefenderButton?.addEventListener("click", () => addTrenchesDefender({ saveTemplate: true }));
 
 els.resetTrenchesButton?.addEventListener("click", () => {
   resetTrenchesRun();
@@ -6644,6 +6727,14 @@ els.clearTrenchesPathButton?.addEventListener("click", () => {
   saveTrenchesState();
   renderTrenches();
 });
+els.clearTrenchesOffenseButton?.addEventListener("click", () => {
+  Object.values(trenchesState.assignments).forEach(assignment => {
+    assignment.path = [];
+    assignment.targetId = "";
+  });
+  saveTrenchesState();
+  renderTrenches();
+});
 els.undoTrenchesDefensePointButton?.addEventListener("click", () => {
   if (trenchesState.selectedSide !== "defense") return;
   selectedTrenchesMovement().path?.pop();
@@ -6653,6 +6744,11 @@ els.undoTrenchesDefensePointButton?.addEventListener("click", () => {
 els.clearTrenchesDefensePathButton?.addEventListener("click", () => {
   if (trenchesState.selectedSide !== "defense") return;
   selectedTrenchesMovement().path = [];
+  saveTrenchesState();
+  renderTrenches();
+});
+els.clearTrenchesDefenseButton?.addEventListener("click", () => {
+  trenchesState.defensePaths = {};
   saveTrenchesState();
   renderTrenches();
 });

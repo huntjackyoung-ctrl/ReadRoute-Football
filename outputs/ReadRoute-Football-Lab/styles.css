@@ -371,7 +371,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 .trenches-editor-tabs {
   margin: 14px 0 12px;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(3, 1fr);
   gap: 7px;
 }
 .trenches-pane {
@@ -477,6 +477,15 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   text-align: left;
 }
 .trenches-assignment-chip strong {
+  color: var(--green);
+  font-weight: 950;
+}
+.trenches-assignment-chip input {
+  min-width: 0;
+  height: 30px;
+  border: 1px solid #d7dccd;
+  border-radius: 6px;
+  padding: 0 7px;
   color: var(--green);
   font-weight: 950;
 }

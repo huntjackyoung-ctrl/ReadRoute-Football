@@ -77,6 +77,7 @@
           <div class="trenches-editor-tabs" role="tablist" aria-label="Trenches editor">
             <button id="trenchesOffenseTab" class="route-tool-button active" data-trenches-panel-tab="offense" type="button">Edit Offense</button>
             <button id="trenchesDefenseTab" class="route-tool-button" data-trenches-panel-tab="defense" type="button">Edit Defense</button>
+            <button id="trenchesFrontTab" class="route-tool-button" data-trenches-panel-tab="front" type="button">Create Front</button>
           </div>
           <div id="trenchesOffensePane" class="trenches-pane active" data-trenches-pane="offense">
             <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
@@ -92,13 +93,28 @@
             </select>
             <div class="button-row">
               <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
-              <button id="clearTrenchesPathButton" class="route-tool-button danger">Clear Path</button>
+              <button id="clearTrenchesPathButton" class="route-tool-button">Clear Path</button>
             </div>
+            <button id="clearTrenchesOffenseButton" class="route-tool-button danger">Clear All Offense</button>
             <div id="trenchesAssignmentsList" class="trenches-assignment-list"></div>
           </div>
           <div id="trenchesDefensePane" class="trenches-pane" data-trenches-pane="defense">
             <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
             <select id="trenchesFrontSelect"></select>
+            <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
+            <div class="button-row">
+              <button id="undoTrenchesDefensePointButton" class="route-tool-button">Undo Point</button>
+              <button id="clearTrenchesDefensePathButton" class="route-tool-button">Clear Path</button>
+            </div>
+            <button id="clearTrenchesDefenseButton" class="route-tool-button danger">Clear All Defense</button>
+            <div class="trenches-defender-editor">
+              <p class="eyebrow">Defenders</p>
+              <div id="trenchesDefenderList"></div>
+            </div>
+          </div>
+          <div id="trenchesFrontPane" class="trenches-pane" data-trenches-pane="front">
+            <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
+            <select id="trenchesFrontSelectMirror"></select>
             <label class="field-label" for="trenchesFrontName">Front name</label>
             <input id="trenchesFrontName" type="text" placeholder="Mint, Bear, Over...">
             <div class="button-row">
@@ -106,14 +122,10 @@
               <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
             </div>
             <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
-            <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
-            <div class="button-row">
-              <button id="undoTrenchesDefensePointButton" class="route-tool-button">Undo Movement</button>
-              <button id="clearTrenchesDefensePathButton" class="route-tool-button danger">Clear Movement</button>
-            </div>
+            <button id="addTrenchesFrontDefenderButton" class="route-tool-button">+ Defender</button>
             <div class="trenches-defender-editor">
-              <p class="eyebrow">Front defenders</p>
-              <div id="trenchesDefenderList"></div>
+              <p class="eyebrow">Template defenders</p>
+              <div id="trenchesFrontDefenderList"></div>
             </div>
           </div>
           <div class="button-row">
@@ -127,7 +139,7 @@
 
         <div class="trenches-board-card">
           <div id="trenchesBoard" class="trenches-board"></div>
-          <p class="field-note">Use Move to set alignments. Use Draw to select an offensive player or defender, then click the field to draw that player’s movement. Click a path point to round that break.</p>
+          <p class="field-note">Use Move to set alignments. Use Draw to select an offensive player or defender, then click the field to draw that player's movement. Click a path point to round that break.</p>
         </div>
       </div>
     </section>
