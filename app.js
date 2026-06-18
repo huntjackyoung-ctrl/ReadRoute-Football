@@ -3873,15 +3873,19 @@ function defaultTrenchesPositions(frontId = trenchesState.frontId) {
 function trenchesPositions(frontId = trenchesState.frontId) {
   const saved = trenchesState.fronts?.[frontId];
   const defaults = defaultTrenchesPositions(frontId);
+  const defaultDefenseIds = new Set(defaults.defense.map(player => player.id));
   return {
     offense: defaults.offense.map(player => ({
       ...player,
       ...(saved?.offense?.find(item => item.id === player.id) || {})
     })),
-    defense: defaults.defense.map(player => ({
-      ...player,
-      ...(saved?.defense?.find(item => item.id === player.id) || {})
-    }))
+    defense: [
+      ...defaults.defense.map(player => ({
+        ...player,
+        ...(saved?.defense?.find(item => item.id === player.id) || {})
+      })),
+      ...((saved?.defense || []).filter(player => !defaultDefenseIds.has(player.id)))
+    ]
   };
 }
 
@@ -6443,14 +6447,16 @@ els.addTrenchesDefenderButton?.addEventListener("click", () => {
   }
   const positions = trenchesPositions(trenchesState.frontId);
   const count = positions.defense.length + 1;
-  positions.defense.push({
+  const newDefender = {
     id: `D${crypto.randomUUID().slice(0, 8)}`,
     label: `D${count}`,
     x: 450,
     y: 180
-  });
+  };
+  positions.defense.push(newDefender);
   setTrenchesPositions(trenchesState.frontId, positions);
   saveCurrentTrenchesFront();
+  updateTrenchesSelection(newDefender.id, "defense");
   renderTrenches();
   showSaveSuccess("Defender added");
 });
