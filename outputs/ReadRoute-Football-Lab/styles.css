@@ -708,12 +708,28 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   min-height: 54px;
   padding: 12px 14px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: center;
   color: var(--ink);
   background: #f5f8ec;
+  cursor: pointer;
+  list-style: none;
 }
+.folder-pick-card-header::-webkit-details-marker { display: none; }
+.folder-pick-card-header::before {
+  content: "+";
+  width: 18px;
+  height: 18px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 50%;
+  color: var(--green-dark);
+  background: #e5f4bd;
+  font-size: 13px;
+  font-weight: 950;
+}
+.folder-pick-card[open] > .folder-pick-card-header::before { content: "-"; }
 .folder-pick-card-header strong {
   color: var(--ink);
   font-size: 14px;

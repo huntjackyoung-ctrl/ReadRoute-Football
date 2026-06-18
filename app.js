@@ -1218,13 +1218,13 @@ function folderPlayPickerMarkup(folderId) {
     ).length;
     const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
     return `
-      <section class="folder-pick-card">
-        <div class="folder-pick-card-header">
+      <details class="folder-pick-card">
+        <summary class="folder-pick-card-header">
           <span class="folder-pick-badge">Formation</span>
           <strong>${escapeHtml(formation.name)}</strong>
           <small>${selectedCount}/${formationPlays.length} plays</small>
           ${folderItemButton(formationKey, formationSelected, "Add Form", "Remove")}
-        </div>
+        </summary>
         <div class="folder-pick-card-body">
           ${formationPlays.length ? `
             <div class="folder-pick-row all">
@@ -1253,7 +1253,7 @@ function folderPlayPickerMarkup(folderId) {
             <p class="library-empty">No plays saved for this formation. You can still add the formation above.</p>
           `}
         </div>
-      </section>
+      </details>
     `;
   }).join("");
 
@@ -1582,6 +1582,9 @@ function renderPlaybookLibrary() {
     button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
   });
   els.playbookLibrary.querySelectorAll("[data-toggle-folder-item]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+    });
     button.addEventListener("click", () => {
       const included = button.dataset.folderIncluded === "true";
       setItemFolderMembership(
