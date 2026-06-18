@@ -421,6 +421,30 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   border-color: var(--green);
   box-shadow: inset 4px 0 0 var(--lime);
 }
+.trenches-defender-editor {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+.trenches-defender-editor .eyebrow {
+  margin-bottom: 9px;
+}
+.trenches-defender-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 7px;
+}
+.trenches-defender-row input {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid #d7dccd;
+  border-radius: 6px;
+  padding: 0 9px;
+  background: #fff;
+  font-weight: 900;
+}
 .library-heading {
   margin-bottom: 26px;
   display: flex;

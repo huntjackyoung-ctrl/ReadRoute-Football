@@ -71,6 +71,13 @@ const trenchesFronts = {
   }
 };
 
+function trenchesFrontOptions() {
+  return {
+    ...trenchesFronts,
+    ...((typeof trenchesState !== "undefined" && trenchesState?.customFronts) || {})
+  };
+}
+
 const fieldStandards = {
   highSchool: {
     label: "High School",
@@ -275,6 +282,9 @@ const els = {
   routeOptionDefense: document.querySelector("#routeOptionDefense"),
   allRouteOptions: document.querySelector("#allRouteOptions"),
   trenchesFrontSelect: document.querySelector("#trenchesFrontSelect"),
+  newTrenchesFrontButton: document.querySelector("#newTrenchesFrontButton"),
+  saveTrenchesFrontButton: document.querySelector("#saveTrenchesFrontButton"),
+  addTrenchesDefenderButton: document.querySelector("#addTrenchesDefenderButton"),
   trenchesBoard: document.querySelector("#trenchesBoard"),
   trenchesSelectedName: document.querySelector("#trenchesSelectedName"),
   trenchesAssignmentSelect: document.querySelector("#trenchesAssignmentSelect"),
@@ -282,6 +292,7 @@ const els = {
   clearTrenchesPathButton: document.querySelector("#clearTrenchesPathButton"),
   trenchesNoteInput: document.querySelector("#trenchesNoteInput"),
   trenchesAssignmentsList: document.querySelector("#trenchesAssignmentsList"),
+  trenchesDefenderList: document.querySelector("#trenchesDefenderList"),
   saveTrenchesButton: document.querySelector("#saveTrenchesButton"),
   resetTrenchesButton: document.querySelector("#resetTrenchesButton"),
   runTrenchesButton: document.querySelector("#runTrenchesButton"),
@@ -311,6 +322,8 @@ function defaultTrenchesAssignments() {
 
 function loadTrenchesState() {
   const saved = readJsonStorage(storageKeys.trenches) || {};
+  const customFronts = saved.customFronts || {};
+  const allFronts = { ...trenchesFronts, ...customFronts };
   const assignments = {
     ...defaultTrenchesAssignments(),
     ...(saved.assignments || {})
@@ -329,10 +342,11 @@ function loadTrenchesState() {
     };
   });
   return {
-    frontId: trenchesFronts[saved.frontId] ? saved.frontId : "even",
+    frontId: allFronts[saved.frontId] ? saved.frontId : "even",
     selectedId: offensiveLine.some(lineman => lineman.id === saved.selectedId) ? saved.selectedId : "LT",
     assignments,
-    fronts: saved.fronts || {}
+    fronts: saved.fronts || {},
+    customFronts
   };
 }
 
@@ -3800,18 +3814,20 @@ function renderReads() {
 }
 
 function defaultTrenchesPositions(frontId = trenchesState.frontId) {
-  const front = trenchesFronts[frontId] || trenchesFronts.even;
+  const front = trenchesFrontOptions()[frontId] || trenchesFronts.even;
+  const customFront = Boolean(trenchesState?.customFronts?.[frontId]);
+  const olX = { LT: 330, LG: 390, C: 450, RG: 510, RT: 570 };
   return {
     offense: offensiveLine.map(lineman => ({
       id: lineman.id,
       label: lineman.id,
-      x: 250 + ((lineman.x - 370) * 1.35),
-      y: 315
+      x: olX[lineman.id] || 450,
+      y: 300
     })),
     defense: front.defenders.map((defender, index) => ({
-      id: `D${index}`,
+      id: defender.id || `D${index}`,
       label: defender.label,
-      x: 250 + ((defender.x - 330) * 1.15),
+      x: customFront ? defender.x : 250 + ((defender.x - 330) * 1.15),
       y: defender.y
     }))
   };
@@ -3835,6 +3851,57 @@ function trenchesPositions(frontId = trenchesState.frontId) {
 function setTrenchesPositions(frontId, positions) {
   trenchesState.fronts ||= {};
   trenchesState.fronts[frontId] = structuredClone(positions);
+  saveTrenchesState();
+}
+
+function trenchesFrontFromPositions(name, positions) {
+  return {
+    name: name.trim().slice(0, 48) || "Custom Front",
+    defenders: positions.defense.map(defender => ({
+      id: defender.id,
+      label: defender.label || "D",
+      x: Math.round(defender.x),
+      y: Math.round(defender.y)
+    }))
+  };
+}
+
+function saveCurrentTrenchesFront(nameOverride = "") {
+  const front = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.even;
+  const name = nameOverride || front.name || "Custom Front";
+  const positions = trenchesPositions(trenchesState.frontId);
+  trenchesState.customFronts ||= {};
+  trenchesState.customFronts[trenchesState.frontId] = trenchesFrontFromPositions(name, positions);
+  setTrenchesPositions(trenchesState.frontId, positions);
+}
+
+function createCustomTrenchesFront(name, positions = trenchesPositions(trenchesState.frontId)) {
+  const id = `custom-${crypto.randomUUID()}`;
+  trenchesState.customFronts ||= {};
+  trenchesState.fronts ||= {};
+  trenchesState.customFronts[id] = trenchesFrontFromPositions(name, positions);
+  trenchesState.fronts[id] = structuredClone(positions);
+  trenchesState.frontId = id;
+  saveTrenchesState();
+  return id;
+}
+
+function editableTrenchesFrontId() {
+  if (trenchesState.customFronts?.[trenchesState.frontId]) return trenchesState.frontId;
+  const front = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.even;
+  const name = window.prompt("Name this custom front:", `${front.name} Custom`);
+  if (!name) return null;
+  return createCustomTrenchesFront(name);
+}
+
+function updateTrenchesSelection(id) {
+  trenchesState.selectedId = id;
+  const assignment = trenchesState.assignments[id];
+  if (assignment) {
+    els.trenchesSelectedName.textContent = id;
+    els.trenchesAssignmentSelect.value = assignment.assignment;
+    els.trenchesNoteInput.value = assignment.note || "";
+  }
   saveTrenchesState();
 }
 
@@ -3886,7 +3953,7 @@ function pointOnPath(start, points, progress) {
 
 function renderTrenches() {
   if (!els.trenchesBoard) return;
-  els.trenchesFrontSelect.innerHTML = Object.entries(trenchesFronts)
+  els.trenchesFrontSelect.innerHTML = Object.entries(trenchesFrontOptions())
     .map(([id, front]) => `<option value="${id}">${escapeHtml(front.name)}</option>`)
     .join("");
   els.trenchesFrontSelect.value = trenchesState.frontId;
@@ -3944,8 +4011,7 @@ function renderTrenches() {
 
   els.trenchesBoard.querySelectorAll("[data-trenches-lineman]").forEach(node => {
     node.addEventListener("click", () => {
-      trenchesState.selectedId = node.dataset.trenchesLineman;
-      saveTrenchesState();
+      updateTrenchesSelection(node.dataset.trenchesLineman);
       renderTrenches();
     });
     node.addEventListener("pointerdown", event => startTrenchesDrag(event, "offense", node.dataset.trenchesLineman));
@@ -3982,12 +4048,52 @@ function renderTrenches() {
       renderTrenches();
     });
   });
+
+  const currentPositions = trenchesPositions(trenchesState.frontId);
+  els.trenchesDefenderList.innerHTML = currentPositions.defense.map(defender => `
+    <div class="trenches-defender-row">
+      <input type="text" maxlength="8" value="${escapeHtml(defender.label)}" data-trenches-def-label="${defender.id}" aria-label="Defender label">
+      <button class="library-action-button danger" data-delete-trenches-defender="${defender.id}">Delete</button>
+    </div>
+  `).join("");
+  els.trenchesDefenderList.querySelectorAll("[data-trenches-def-label]").forEach(input => {
+    input.addEventListener("change", () => {
+      const frontId = editableTrenchesFrontId();
+      if (!frontId) {
+        renderTrenches();
+        return;
+      }
+      const positions = trenchesPositions(trenchesState.frontId);
+      const defender = positions.defense.find(item => item.id === input.dataset.trenchesDefLabel);
+      if (!defender) return;
+      defender.label = input.value.trim() || defender.label;
+      setTrenchesPositions(trenchesState.frontId, positions);
+      saveCurrentTrenchesFront();
+      renderTrenches();
+    });
+  });
+  els.trenchesDefenderList.querySelectorAll("[data-delete-trenches-defender]").forEach(button => {
+    button.addEventListener("click", () => {
+      const frontId = editableTrenchesFrontId();
+      if (!frontId) return;
+      const positions = trenchesPositions(trenchesState.frontId);
+      positions.defense = positions.defense.filter(item => item.id !== button.dataset.deleteTrenchesDefender);
+      setTrenchesPositions(trenchesState.frontId, positions);
+      saveCurrentTrenchesFront();
+      renderTrenches();
+    });
+  });
 }
 
 function startTrenchesDrag(event, side, id) {
   if (trenchesAnimationFrame) return;
   event.preventDefault();
   event.stopPropagation();
+  if (side === "offense") updateTrenchesSelection(id);
+  if (side === "defense" && !trenchesState.customFronts?.[trenchesState.frontId]) {
+    const frontId = editableTrenchesFrontId();
+    if (!frontId) return;
+  }
   const point = trenchesPointFromEvent(event);
   const positions = trenchesPositions(trenchesState.frontId);
   const list = side === "offense" ? positions.offense : positions.defense;
@@ -5986,6 +6092,50 @@ els.trenchesFrontSelect?.addEventListener("change", event => {
   trenchesState.frontId = event.target.value;
   saveTrenchesState();
   renderTrenches();
+});
+
+els.newTrenchesFrontButton?.addEventListener("click", () => {
+  resetTrenchesRun();
+  const current = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.even;
+  const name = window.prompt("Name this new front:", `${current.name} Copy`);
+  if (!name) return;
+  createCustomTrenchesFront(name);
+  renderTrenches();
+  showSaveSuccess("Custom front created");
+});
+
+els.saveTrenchesFrontButton?.addEventListener("click", () => {
+  resetTrenchesRun();
+  const current = trenchesFrontOptions()[trenchesState.frontId] || trenchesFronts.even;
+  if (trenchesState.customFronts?.[trenchesState.frontId]) {
+    const name = window.prompt("Front name:", current.name);
+    if (!name) return;
+    saveCurrentTrenchesFront(name);
+  } else {
+    const name = window.prompt("Save this as a custom front:", `${current.name} Custom`);
+    if (!name) return;
+    createCustomTrenchesFront(name);
+  }
+  renderTrenches();
+  showSaveSuccess("Front saved");
+});
+
+els.addTrenchesDefenderButton?.addEventListener("click", () => {
+  resetTrenchesRun();
+  const frontId = editableTrenchesFrontId();
+  if (!frontId) return;
+  const positions = trenchesPositions(trenchesState.frontId);
+  const count = positions.defense.length + 1;
+  positions.defense.push({
+    id: `D${crypto.randomUUID().slice(0, 8)}`,
+    label: `D${count}`,
+    x: 450,
+    y: 180
+  });
+  setTrenchesPositions(trenchesState.frontId, positions);
+  saveCurrentTrenchesFront();
+  renderTrenches();
+  showSaveSuccess("Defender added");
 });
 
 function updateSelectedTrenchesAssignment() {

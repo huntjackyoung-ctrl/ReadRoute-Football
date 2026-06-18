@@ -62,6 +62,11 @@
         <div class="trenches-controls">
           <label class="field-label" for="trenchesFrontSelect">Front</label>
           <select id="trenchesFrontSelect"></select>
+          <div class="button-row">
+            <button id="newTrenchesFrontButton" class="route-tool-button">New Front</button>
+            <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
+          </div>
+          <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
           <button id="runTrenchesButton" class="button button-primary">Run Trenches</button>
           <button id="resetTrenchesPlayButton" class="route-tool-button">Reset Run</button>
           <button id="resetTrenchesAlignmentButton" class="route-tool-button">Reset Alignment</button>
@@ -92,6 +97,10 @@
           <label class="field-label" for="trenchesNoteInput">Coaching note</label>
           <textarea id="trenchesNoteInput" rows="4" placeholder="First step, eyes, target..."></textarea>
           <button id="saveTrenchesButton" class="button button-primary full-width">Save Assignment</button>
+          <div class="trenches-defender-editor">
+            <p class="eyebrow">Front defenders</p>
+            <div id="trenchesDefenderList"></div>
+          </div>
           <div id="trenchesAssignmentsList" class="trenches-assignment-list"></div>
         </aside>
 
