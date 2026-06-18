@@ -267,6 +267,8 @@ const els = {
   deleteTrenchesFrontButton: document.querySelector("#deleteTrenchesFrontButton"),
   addTrenchesOffenseButton: document.querySelector("#addTrenchesOffenseButton"),
   addTrenchesDefenderButton: document.querySelector("#addTrenchesDefenderButton"),
+  undoTrenchesDefensePointButton: document.querySelector("#undoTrenchesDefensePointButton"),
+  clearTrenchesDefensePathButton: document.querySelector("#clearTrenchesDefensePathButton"),
   trenchesMoveButton: document.querySelector("#trenchesMoveButton"),
   trenchesDrawButton: document.querySelector("#trenchesDrawButton"),
   addTrenchesNoteButton: document.querySelector("#addTrenchesNoteButton"),
@@ -4254,7 +4256,7 @@ function renderTrenches() {
   els.trenchesBoard.querySelectorAll("[data-trenches-defender]").forEach(node => {
     node.addEventListener("click", event => {
       event.stopPropagation();
-      if (trenchesState.mode === "draw" && trenchesState.selectedSide === "offense") {
+      if (trenchesState.mode === "draw" && trenchesState.panelTab === "offense" && trenchesState.selectedSide === "offense") {
         const assignment = trenchesState.assignments[trenchesState.selectedId];
         const defenderId = node.dataset.trenchesDefender;
         const positions = trenchesPositions(trenchesState.frontId);
@@ -4268,6 +4270,7 @@ function renderTrenches() {
           }
         }
       } else {
+        trenchesState.panelTab = "defense";
         updateTrenchesSelection(node.dataset.trenchesDefender, "defense");
       }
       saveTrenchesState();
@@ -4328,12 +4331,14 @@ function renderTrenches() {
   els.trenchesDefenderList.innerHTML = currentPositions.defense.map(defender => `
     <div class="trenches-defender-row ${trenchesState.selectedSide === "defense" && trenchesState.selectedId === defender.id ? "active" : ""}">
       <input type="text" maxlength="8" value="${escapeHtml(defender.label)}" data-trenches-def-label="${defender.id}" aria-label="Defender label">
+      <span class="trenches-path-count">${(trenchesState.defensePaths?.[defender.id]?.path || []).length} pts</span>
       <button class="library-action-button" data-select-trenches-defender="${defender.id}">Select</button>
       <button class="library-action-button danger" data-delete-trenches-defender="${defender.id}">Delete</button>
     </div>
   `).join("");
   els.trenchesDefenderList.querySelectorAll("[data-select-trenches-defender]").forEach(button => {
     button.addEventListener("click", () => {
+      trenchesState.panelTab = "defense";
       updateTrenchesSelection(button.dataset.selectTrenchesDefender, "defense");
       renderTrenches();
     });
@@ -6636,6 +6641,18 @@ els.undoTrenchesPointButton?.addEventListener("click", () => {
 els.clearTrenchesPathButton?.addEventListener("click", () => {
   selectedTrenchesMovement().path = [];
   if (trenchesState.selectedSide === "offense") selectedTrenchesMovement().targetId = "";
+  saveTrenchesState();
+  renderTrenches();
+});
+els.undoTrenchesDefensePointButton?.addEventListener("click", () => {
+  if (trenchesState.selectedSide !== "defense") return;
+  selectedTrenchesMovement().path?.pop();
+  saveTrenchesState();
+  renderTrenches();
+});
+els.clearTrenchesDefensePathButton?.addEventListener("click", () => {
+  if (trenchesState.selectedSide !== "defense") return;
+  selectedTrenchesMovement().path = [];
   saveTrenchesState();
   renderTrenches();
 });
