@@ -31,7 +31,44 @@ const storageKeys = {
   draft: "readroute-play-draft",
   folders: "readroute-custom-folders",
   folderAssignments: "readroute-folder-assignments",
-  savedAt: "readroute-last-saved-at"
+  savedAt: "readroute-last-saved-at",
+  trenches: "readroute-trenches"
+};
+
+const trenchesFronts = {
+  even: {
+    name: "Even 4-2",
+    defenders: [
+      { label: "E", x: 330, y: 210 }, { label: "T", x: 410, y: 215 },
+      { label: "N", x: 488, y: 215 }, { label: "E", x: 570, y: 210 },
+      { label: "M", x: 430, y: 145 }, { label: "W", x: 520, y: 145 }
+    ]
+  },
+  odd: {
+    name: "Odd 3-4",
+    defenders: [
+      { label: "OLB", x: 310, y: 165 }, { label: "4i", x: 385, y: 212 },
+      { label: "0", x: 450, y: 218 }, { label: "4i", x: 515, y: 212 },
+      { label: "OLB", x: 590, y: 165 }, { label: "M", x: 425, y: 140 },
+      { label: "W", x: 475, y: 140 }
+    ]
+  },
+  bear: {
+    name: "Bear 46",
+    defenders: [
+      { label: "E", x: 315, y: 210 }, { label: "3", x: 405, y: 216 },
+      { label: "0", x: 450, y: 220 }, { label: "3", x: 495, y: 216 },
+      { label: "E", x: 585, y: 210 }, { label: "M", x: 450, y: 140 }
+    ]
+  },
+  tite: {
+    name: "Tite / Mint",
+    defenders: [
+      { label: "OLB", x: 315, y: 165 }, { label: "4i", x: 390, y: 212 },
+      { label: "0", x: 450, y: 218 }, { label: "4i", x: 510, y: 212 },
+      { label: "OLB", x: 585, y: 165 }, { label: "M", x: 450, y: 132 }
+    ]
+  }
 };
 
 const fieldStandards = {
@@ -160,6 +197,7 @@ let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let playbookTab = "all";
 let activeFolderPickerId = null;
+let trenchesState = loadTrenchesState();
 const libraryFolderOpenState = new Map();
 const runFolderOpenState = new Map();
 let saveToastTimer = null;
@@ -233,6 +271,15 @@ const els = {
   routeOptionName: document.querySelector("#routeOptionName"),
   routeOptionDefense: document.querySelector("#routeOptionDefense"),
   allRouteOptions: document.querySelector("#allRouteOptions"),
+  trenchesFrontSelect: document.querySelector("#trenchesFrontSelect"),
+  trenchesBoard: document.querySelector("#trenchesBoard"),
+  trenchesSelectedName: document.querySelector("#trenchesSelectedName"),
+  trenchesAssignmentSelect: document.querySelector("#trenchesAssignmentSelect"),
+  trenchesPullSelect: document.querySelector("#trenchesPullSelect"),
+  trenchesNoteInput: document.querySelector("#trenchesNoteInput"),
+  trenchesAssignmentsList: document.querySelector("#trenchesAssignmentsList"),
+  saveTrenchesButton: document.querySelector("#saveTrenchesButton"),
+  resetTrenchesButton: document.querySelector("#resetTrenchesButton"),
 };
 
 function readJsonStorage(key) {
@@ -242,6 +289,33 @@ function readJsonStorage(key) {
   } catch {
     return null;
   }
+}
+
+function defaultTrenchesAssignments() {
+  return offensiveLine.reduce((assignments, lineman) => {
+    assignments[lineman.id] = {
+      assignment: "Base block",
+      pull: "none",
+      note: ""
+    };
+    return assignments;
+  }, {});
+}
+
+function loadTrenchesState() {
+  const saved = readJsonStorage(storageKeys.trenches) || {};
+  return {
+    frontId: trenchesFronts[saved.frontId] ? saved.frontId : "even",
+    selectedId: offensiveLine.some(lineman => lineman.id === saved.selectedId) ? saved.selectedId : "LT",
+    assignments: {
+      ...defaultTrenchesAssignments(),
+      ...(saved.assignments || {})
+    }
+  };
+}
+
+function saveTrenchesState() {
+  localStorage.setItem(storageKeys.trenches, JSON.stringify(trenchesState));
 }
 
 function recoverySnapshot() {
@@ -3703,6 +3777,104 @@ function renderReads() {
   }
 }
 
+function trenchesPullPath(lineman, pull) {
+  const paths = {
+    left: `M ${lineman.x} ${lineman.y} C ${lineman.x - 35} ${lineman.y + 35}, ${lineman.x - 115} ${lineman.y + 35}, ${lineman.x - 155} ${lineman.y - 15}`,
+    right: `M ${lineman.x} ${lineman.y} C ${lineman.x + 35} ${lineman.y + 35}, ${lineman.x + 115} ${lineman.y + 35}, ${lineman.x + 155} ${lineman.y - 15}`,
+    climb: `M ${lineman.x} ${lineman.y} L ${lineman.x} ${lineman.y - 145}`,
+    kickLeft: `M ${lineman.x} ${lineman.y} C ${lineman.x - 45} ${lineman.y + 20}, ${lineman.x - 120} ${lineman.y - 8}, ${lineman.x - 170} ${lineman.y - 55}`,
+    kickRight: `M ${lineman.x} ${lineman.y} C ${lineman.x + 45} ${lineman.y + 20}, ${lineman.x + 120} ${lineman.y - 8}, ${lineman.x + 170} ${lineman.y - 55}`
+  };
+  return paths[pull] || "";
+}
+
+function renderTrenches() {
+  if (!els.trenchesBoard) return;
+  els.trenchesFrontSelect.innerHTML = Object.entries(trenchesFronts)
+    .map(([id, front]) => `<option value="${id}">${escapeHtml(front.name)}</option>`)
+    .join("");
+  els.trenchesFrontSelect.value = trenchesState.frontId;
+
+  const selectedAssignment = trenchesState.assignments[trenchesState.selectedId];
+  els.trenchesSelectedName.textContent = trenchesState.selectedId;
+  els.trenchesAssignmentSelect.value = selectedAssignment.assignment;
+  els.trenchesPullSelect.value = selectedAssignment.pull;
+  els.trenchesNoteInput.value = selectedAssignment.note || "";
+
+  const front = trenchesFronts[trenchesState.frontId];
+  const ol = offensiveLine.map(lineman => ({
+    ...lineman,
+    x: 250 + ((lineman.x - 370) * 1.35),
+    y: 315
+  }));
+  const qb = { label: "QB", x: 450, y: 405 };
+  const defenders = front.defenders.map(defender => ({
+    ...defender,
+    x: 250 + ((defender.x - 330) * 1.15),
+    y: defender.y
+  }));
+
+  els.trenchesBoard.innerHTML = `
+    <svg viewBox="0 0 900 520" role="img" aria-label="The Trenches front and offensive line board">
+      <defs>
+        <marker id="trenchArrow" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto" markerUnits="userSpaceOnUse">
+          <path d="M0,0 L0,7 L8,3.5 z" fill="#f2c35a"></path>
+        </marker>
+      </defs>
+      <rect width="900" height="520" rx="16" fill="#174c35"></rect>
+      <line x1="80" y1="300" x2="820" y2="300" stroke="rgba(255,255,255,.9)" stroke-width="4"></line>
+      <text x="82" y="292" fill="#dbe8df" font-size="12" font-weight="800">LINE OF SCRIMMAGE</text>
+      ${defenders.map(defender => `
+        <g>
+          <circle cx="${defender.x}" cy="${defender.y}" r="24" fill="#103049" stroke="#76d7ff" stroke-width="3"></circle>
+          <text x="${defender.x}" y="${defender.y + 5}" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="900">${escapeHtml(defender.label)}</text>
+        </g>
+      `).join("")}
+      ${ol.map(lineman => {
+        const assignment = trenchesState.assignments[lineman.id];
+        const path = trenchesPullPath(lineman, assignment.pull);
+        return `
+          ${path ? `<path d="${path}" fill="none" stroke="#f2c35a" stroke-width="6" stroke-linecap="round" marker-end="url(#trenchArrow)"></path>` : ""}
+          <g class="trenches-lineman ${trenchesState.selectedId === lineman.id ? "selected" : ""}" data-trenches-lineman="${lineman.id}">
+            <rect x="${lineman.x - 27}" y="${lineman.y - 27}" width="54" height="54" rx="10" fill="#c9f45c" stroke="${trenchesState.selectedId === lineman.id ? "#ffffff" : "#102016"}" stroke-width="${trenchesState.selectedId === lineman.id ? 5 : 2}"></rect>
+            <text x="${lineman.x}" y="${lineman.y + 5}" text-anchor="middle" fill="#102016" font-size="15" font-weight="950">${lineman.id}</text>
+            <text x="${lineman.x}" y="${lineman.y + 50}" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="850">${escapeHtml(assignment.assignment)}</text>
+          </g>
+        `;
+      }).join("")}
+      <g>
+        <circle cx="${qb.x}" cy="${qb.y}" r="22" fill="#153e5a" stroke="#76d7ff" stroke-width="3"></circle>
+        <text x="${qb.x}" y="${qb.y + 5}" text-anchor="middle" fill="#fff" font-size="13" font-weight="900">QB</text>
+      </g>
+    </svg>
+  `;
+
+  els.trenchesBoard.querySelectorAll("[data-trenches-lineman]").forEach(node => {
+    node.addEventListener("click", () => {
+      trenchesState.selectedId = node.dataset.trenchesLineman;
+      saveTrenchesState();
+      renderTrenches();
+    });
+  });
+
+  els.trenchesAssignmentsList.innerHTML = offensiveLine.map(lineman => {
+    const assignment = trenchesState.assignments[lineman.id];
+    return `
+      <button class="trenches-assignment-chip ${trenchesState.selectedId === lineman.id ? "active" : ""}" data-trenches-select="${lineman.id}">
+        <strong>${lineman.id}</strong>
+        <span>${escapeHtml(assignment.assignment)}${assignment.pull !== "none" ? ` | ${escapeHtml(assignment.pull)}` : ""}</span>
+      </button>
+    `;
+  }).join("");
+  els.trenchesAssignmentsList.querySelectorAll("[data-trenches-select]").forEach(button => {
+    button.addEventListener("click", () => {
+      trenchesState.selectedId = button.dataset.trenchesSelect;
+      saveTrenchesState();
+      renderTrenches();
+    });
+  });
+}
+
 function escapeHtml(value) {
   return value.replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[char]));
 }
@@ -3720,6 +3892,7 @@ function render() {
   document.body.classList.toggle("run-view", appTab === "run");
   document.body.classList.toggle("test-view", appTab === "test");
   document.body.classList.toggle("playbook-view", appTab === "playbook");
+  document.body.classList.toggle("trenches-view", appTab === "trenches");
   document.body.classList.toggle("create-formation", appTab === "create" && createScreen === "formation");
   document.body.classList.toggle("create-play", appTab === "create" && createScreen === "play");
   document.body.classList.toggle("create-defense", appTab === "create" && createScreen === "defense");
@@ -3867,6 +4040,7 @@ function render() {
   renderRunControls();
   renderTestControls();
   renderPlaybookLibrary();
+  renderTrenches();
 }
 
 document.querySelector("#savePlayButton").addEventListener("click", () => {
@@ -5603,6 +5777,38 @@ document.querySelector("#defenseNoMovementButton").addEventListener("click", () 
 document.querySelector("#scenarioResetButton").addEventListener("click", () => {
   resetRunScenario();
   render();
+});
+
+els.trenchesFrontSelect?.addEventListener("change", event => {
+  trenchesState.frontId = event.target.value;
+  saveTrenchesState();
+  renderTrenches();
+});
+
+function updateSelectedTrenchesAssignment() {
+  const assignment = trenchesState.assignments[trenchesState.selectedId];
+  assignment.assignment = els.trenchesAssignmentSelect.value;
+  assignment.pull = els.trenchesPullSelect.value;
+  assignment.note = els.trenchesNoteInput.value;
+  saveTrenchesState();
+  renderTrenches();
+}
+
+els.trenchesAssignmentSelect?.addEventListener("change", updateSelectedTrenchesAssignment);
+els.trenchesPullSelect?.addEventListener("change", updateSelectedTrenchesAssignment);
+els.trenchesNoteInput?.addEventListener("input", () => {
+  trenchesState.assignments[trenchesState.selectedId].note = els.trenchesNoteInput.value;
+  saveTrenchesState();
+});
+els.saveTrenchesButton?.addEventListener("click", () => {
+  updateSelectedTrenchesAssignment();
+  showSaveSuccess("Trenches assignment saved");
+});
+els.resetTrenchesButton?.addEventListener("click", () => {
+  trenchesState.assignments = defaultTrenchesAssignments();
+  saveTrenchesState();
+  renderTrenches();
+  showSaveSuccess("Trenches assignments reset");
 });
 
 document.querySelectorAll("[data-app-tab]").forEach(button => {

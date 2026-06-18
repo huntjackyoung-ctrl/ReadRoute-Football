@@ -320,6 +320,100 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   background: var(--panel);
   box-shadow: 0 12px 35px rgba(11,30,22,.10);
 }
+.trenches-lab {
+  display: none;
+  max-width: 1380px;
+  margin: 24px auto 56px;
+  padding: 30px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 12px 35px rgba(11,30,22,.10);
+}
+.trenches-heading {
+  margin-bottom: 22px;
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: end;
+}
+.trenches-heading h2 {
+  margin: 3px 0 6px;
+  font: 700 32px Georgia, serif;
+}
+.trenches-heading p { margin: 0; color: var(--muted); font-size: 12px; }
+.trenches-controls {
+  min-width: 260px;
+  display: grid;
+  gap: 8px;
+}
+.trenches-workspace {
+  display: grid;
+  grid-template-columns: minmax(240px, 310px) minmax(620px, 1fr);
+  gap: 24px;
+  align-items: start;
+}
+.trenches-panel {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #faf8f2;
+}
+.trenches-panel h3 {
+  margin: 3px 0 14px;
+  font: 700 28px Georgia, serif;
+}
+.trenches-panel textarea {
+  width: 100%;
+  min-height: 82px;
+  resize: vertical;
+}
+.trenches-board-card {
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #faf8f2;
+}
+.trenches-board {
+  overflow: hidden;
+  border-radius: 16px;
+  box-shadow: 0 12px 34px rgba(11,30,22,.18);
+}
+.trenches-board svg {
+  width: 100%;
+  display: block;
+}
+.trenches-lineman { cursor: pointer; }
+.trenches-assignment-list {
+  margin-top: 16px;
+  display: grid;
+  gap: 7px;
+}
+.trenches-assignment-chip {
+  padding: 9px 10px;
+  display: grid;
+  grid-template-columns: 42px 1fr;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #d7dccd;
+  border-radius: 6px;
+  color: var(--ink);
+  background: #fff;
+  text-align: left;
+}
+.trenches-assignment-chip strong {
+  color: var(--green);
+  font-weight: 950;
+}
+.trenches-assignment-chip span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+.trenches-assignment-chip.active {
+  border-color: var(--green);
+  box-shadow: inset 4px 0 0 var(--lime);
+}
 .library-heading {
   margin-bottom: 26px;
   display: flex;
@@ -1985,6 +2079,15 @@ body.playbook-view #newPlayButton {
   display: none;
 }
 body.playbook-view .playbook-library { display: block; }
+
+body.trenches-view .create-subnav,
+body.trenches-view .workspace,
+body.trenches-view .learning-strip,
+body.trenches-view .playbook-library,
+body.trenches-view #newPlayButton {
+  display: none;
+}
+body.trenches-view .trenches-lab { display: block; }
 
 body.create-formation .play-screen-only,
 body.create-formation .defense-panel,
