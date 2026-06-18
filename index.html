@@ -60,6 +60,13 @@
           <p>Pick a defensive front, draw each lineman's path, and teach the rule when contact happens.</p>
         </div>
         <div class="trenches-controls">
+          <button id="runTrenchesButton" class="button button-primary">Run Trenches</button>
+          <button id="resetTrenchesPlayButton" class="route-tool-button">Reset Run</button>
+        </div>
+      </div>
+
+      <div class="trenches-workspace">
+        <aside class="trenches-panel">
           <label class="field-label" for="trenchesPlayName">Trench play</label>
           <input id="trenchesPlayName" type="text" placeholder="Power, Counter, Inside Zone...">
           <select id="trenchesPlaySelect"></select>
@@ -79,17 +86,17 @@
             <button id="trenchesDrawButton" class="route-tool-button">Draw</button>
           </div>
           <button id="addTrenchesNoteButton" class="route-tool-button">+ Note</button>
-          <button id="runTrenchesButton" class="button button-primary">Run Trenches</button>
-          <button id="resetTrenchesPlayButton" class="route-tool-button">Reset Run</button>
           <button id="resetTrenchesAlignmentButton" class="route-tool-button">Reset Alignment</button>
           <button id="resetTrenchesButton" class="route-tool-button">Clear Paths</button>
-        </div>
-      </div>
-
-      <div class="trenches-workspace">
-        <aside class="trenches-panel">
-          <p class="eyebrow">Selected blocker</p>
+          <p class="eyebrow trenches-selected-label">Selected player</p>
           <h3 id="trenchesSelectedName">LT</h3>
+          <label class="field-label" for="trenchesSpeedSelect">Speed</label>
+          <select id="trenchesSpeedSelect">
+            <option value="0.6">Slow</option>
+            <option value="0.85">Controlled</option>
+            <option value="1" selected>Normal</option>
+            <option value="1.2">Fast</option>
+          </select>
           <div class="button-row">
             <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
             <button id="clearTrenchesPathButton" class="route-tool-button danger">Clear Path</button>

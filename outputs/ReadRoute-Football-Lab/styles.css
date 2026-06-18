@@ -482,10 +482,14 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .trenches-defender-row {
   display: grid;
-  grid-template-columns: 1fr auto;
+  grid-template-columns: 1fr auto auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 7px;
+}
+.trenches-defender-row.active {
+  padding-left: 6px;
+  border-left: 4px solid var(--lime);
 }
 .trenches-defender-row input {
   min-width: 0;
