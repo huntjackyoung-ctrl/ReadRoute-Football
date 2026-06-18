@@ -850,6 +850,40 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   border-top: 1px solid #e8eddc;
   background: #f8fbf1;
 }
+.folder-picker-panel {
+  margin: 0 0 24px;
+  padding: 18px;
+  border: 2px solid var(--green);
+  border-radius: 10px;
+  background: #fbfff0;
+  box-shadow: 0 12px 28px rgba(23,76,53,.14);
+}
+.folder-picker-panel-heading {
+  margin-bottom: 14px;
+  display: flex;
+  justify-content: space-between;
+  gap: 18px;
+  align-items: start;
+}
+.folder-picker-panel-heading h3 {
+  margin: 2px 0 4px;
+  color: var(--ink);
+  font: 700 22px Georgia, serif;
+}
+.folder-picker-panel .folder-membership-list {
+  border: 1px solid #dfe7cf;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.folder-picker-panel .folder-picker-scroll {
+  max-height: 640px;
+  padding: 14px;
+  gap: 12px;
+}
+.folder-picker-close-button {
+  margin: 0;
+  min-width: 110px;
+}
 .folder-other-files {
   margin-top: 5px;
   border-top: 1px solid #e8eddc;

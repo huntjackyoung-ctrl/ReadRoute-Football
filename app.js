@@ -159,6 +159,7 @@ let testSessionIndex = -1;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let playbookTab = "all";
+let activeFolderPickerId = null;
 const libraryFolderOpenState = new Map();
 const runFolderOpenState = new Map();
 let saveToastTimer = null;
@@ -1218,7 +1219,7 @@ function folderPlayPickerMarkup(folderId) {
     ).length;
     const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
     return `
-      <table style="width:100%;min-width:430px;margin:0 0 14px;border-collapse:separate;border-spacing:0;border:1px solid #dfe7cf;border-radius:8px;background:#fff;color:#0b1e16;table-layout:fixed;overflow:hidden;">
+      <table style="width:100%;min-width:620px;margin:0 0 14px;border-collapse:separate;border-spacing:0;border:1px solid #dfe7cf;border-radius:8px;background:#fff;color:#0b1e16;table-layout:fixed;overflow:hidden;">
         <tbody>
           <tr style="background:#f5f8ec;">
             <td style="width:62px;padding:12px 8px;vertical-align:middle;">
@@ -1324,6 +1325,7 @@ function customFolderMarkup(folder, depth = 0) {
       </summary>
       <div class="custom-folder-actions">
         <button class="library-action-button" data-add-subfolder="${folder.id}">+ Subfolder</button>
+        <button class="library-action-button" data-open-folder-picker="${folder.id}">Manage Items</button>
         <button class="library-action-button" data-rename-folder="${folder.id}">Rename</button>
         <button class="library-action-button danger" data-delete-folder="${folder.id}">Delete</button>
       </div>
@@ -1331,10 +1333,6 @@ function customFolderMarkup(folder, depth = 0) {
         ${children.map(child => customFolderMarkup(child, depth + 1)).join("")}
         ${items.map(item => customLibraryFileMarkup(item, folder.id)).join("")}
         ${!children.length && !items.length ? `<p class="library-empty">This folder is empty.</p>` : ""}
-        <details class="folder-membership-editor">
-          <summary>Choose plays for this folder</summary>
-          ${folderPlayPickerMarkup(folder.id)}
-        </details>
       </div>
     </details>
   `;
@@ -1356,6 +1354,28 @@ function customFolderBrowserMarkup() {
       </div>
       ${roots.map(folder => customFolderMarkup(folder)).join("")}
       ${!roots.length ? `<p class="library-empty">Create a folder such as Week 1 or Cover 2 Beaters.</p>` : ""}
+    </section>
+  `;
+}
+
+function folderPickerPanelMarkup() {
+  if (playbookTab !== "folders" || !activeFolderPickerId) return "";
+  const folder = libraryFolders.find(candidate => candidate.id === activeFolderPickerId);
+  if (!folder) {
+    activeFolderPickerId = null;
+    return "";
+  }
+  return `
+    <section class="folder-picker-panel">
+      <div class="folder-picker-panel-heading">
+        <div>
+          <p class="eyebrow">Add to folder</p>
+          <h3>${escapeHtml(folder.name)}</h3>
+          <p class="custom-folder-help">Use these rows to add formations, all plays in a formation, individual plays, or defenses.</p>
+        </div>
+        <button class="library-action-button folder-picker-close-button" data-close-folder-picker>Done</button>
+      </div>
+      ${folderPlayPickerMarkup(folder.id)}
     </section>
   `;
 }
@@ -1533,6 +1553,7 @@ function renderPlaybookLibrary() {
         aria-selected="${playbookTab === "folders" ? "true" : "false"}"
       >My Folders</button>
     </div>
+    ${folderPickerPanelMarkup()}
     <div class="library-browser">
       <div class="library-files">
         ${playbookTab === "all" ? allFilesBrowserMarkup() : customFolderBrowserMarkup()}
@@ -1544,6 +1565,7 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-playbook-section]").forEach(button => {
     button.addEventListener("click", () => {
       playbookTab = button.dataset.playbookSection;
+      if (playbookTab !== "folders") activeFolderPickerId = null;
       renderPlaybookLibrary();
     });
   });
@@ -1588,6 +1610,13 @@ function renderPlaybookLibrary() {
     ?.addEventListener("click", () => createLibraryFolder(null));
   els.playbookLibrary.querySelectorAll("[data-add-subfolder]").forEach(button => {
     button.addEventListener("click", () => createLibraryFolder(button.dataset.addSubfolder));
+  });
+  els.playbookLibrary.querySelectorAll("[data-open-folder-picker]").forEach(button => {
+    button.addEventListener("click", () => {
+      activeFolderPickerId = button.dataset.openFolderPicker;
+      playbookTab = "folders";
+      renderPlaybookLibrary();
+    });
   });
   els.playbookLibrary.querySelectorAll("[data-rename-folder]").forEach(button => {
     button.addEventListener("click", () => renameLibraryFolder(button.dataset.renameFolder));
@@ -1677,6 +1706,11 @@ function renderPlaybookLibrary() {
   });
   els.playbookLibrary.querySelectorAll("[data-close-folder-picker]").forEach(button => {
     button.addEventListener("click", () => {
+      if (button.closest(".folder-picker-panel")) {
+        activeFolderPickerId = null;
+        renderPlaybookLibrary();
+        return;
+      }
       const editor = button.closest(".folder-membership-editor");
       if (editor) editor.open = false;
       renderPlaybookLibrary();
@@ -1795,6 +1829,7 @@ function deleteLibraryFolder(folderId) {
     else delete libraryAssignments[key];
   });
   libraryFolders = libraryFolders.filter(candidate => candidate.id !== folderId);
+  if (activeFolderPickerId === folderId) activeFolderPickerId = null;
   lastSavedSignature = "";
   persistPlaybook();
   renderPlaybookLibrary();
