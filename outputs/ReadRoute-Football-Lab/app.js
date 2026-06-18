@@ -365,6 +365,7 @@ function loadTrenchesState() {
       : "starter";
   return {
     mode: saved.mode === "draw" ? "draw" : "move",
+    panelTab: saved.panelTab === "defense" ? "defense" : "offense",
     playName: savedPlay?.name || saved.playName || "",
     selectedPlayId,
     plays,
@@ -4025,6 +4026,12 @@ function setTrenchesMode(mode) {
   renderTrenches();
 }
 
+function setTrenchesPanelTab(tab) {
+  trenchesState.panelTab = tab === "defense" ? "defense" : "offense";
+  saveTrenchesState();
+  renderTrenches();
+}
+
 function trenchNoteDimensions(text) {
   const dimensions = noteDimensions(text || "");
   return {
@@ -4127,6 +4134,12 @@ function renderTrenches() {
   els.trenchesSpeedSelect.value = String(selectedTrenchesMovement().speed || 1);
   els.trenchesMoveButton?.classList.toggle("active", trenchesState.mode !== "draw");
   els.trenchesDrawButton?.classList.toggle("active", trenchesState.mode === "draw");
+  document.querySelectorAll("[data-trenches-panel-tab]").forEach(button => {
+    button.classList.toggle("active", button.dataset.trenchesPanelTab === trenchesState.panelTab);
+  });
+  document.querySelectorAll("[data-trenches-pane]").forEach(pane => {
+    pane.classList.toggle("active", pane.dataset.trenchesPane === trenchesState.panelTab);
+  });
 
   const positions = trenchesAnimation?.positions || trenchesPositions(trenchesState.frontId);
   const ol = positions.offense;
@@ -6434,9 +6447,16 @@ document.querySelector("#scenarioResetButton").addEventListener("click", () => {
 });
 
 els.trenchesFrontSelect?.addEventListener("change", event => {
-  resetTrenchesRun();
+  cancelAnimationFrame(trenchesAnimationFrame);
+  trenchesAnimationFrame = null;
+  trenchesAnimation = null;
   trenchesState.frontId = event.target.value;
   if (trenchesState.selectedPlayId) trenchesState.selectedPlayId = null;
+  const positions = trenchesPositions(trenchesState.frontId);
+  if (trenchesState.selectedSide === "defense" && !positions.defense.some(player => player.id === trenchesState.selectedId)) {
+    trenchesState.selectedSide = "offense";
+    trenchesState.selectedId = "LT";
+  }
   saveTrenchesState();
   renderTrenches();
 });
@@ -6479,6 +6499,9 @@ els.saveTrenchesPlayButton?.addEventListener("click", () => {
 
 els.trenchesMoveButton?.addEventListener("click", () => setTrenchesMode("move"));
 els.trenchesDrawButton?.addEventListener("click", () => setTrenchesMode("draw"));
+document.querySelectorAll("[data-trenches-panel-tab]").forEach(button => {
+  button.addEventListener("click", () => setTrenchesPanelTab(button.dataset.trenchesPanelTab));
+});
 
 els.trenchesSpeedSelect?.addEventListener("change", () => {
   selectedTrenchesMovement().speed = Number(els.trenchesSpeedSelect.value) || 1;

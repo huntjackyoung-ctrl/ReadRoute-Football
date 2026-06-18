@@ -368,6 +368,23 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   min-height: 82px;
   resize: vertical;
 }
+.trenches-editor-tabs {
+  margin: 14px 0 12px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 7px;
+}
+.trenches-pane {
+  display: none;
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #d7dccd;
+  border-radius: 9px;
+  background: rgba(255,255,255,.55);
+}
+.trenches-pane.active {
+  display: block;
+}
 .trenches-controls input,
 .trenches-controls select {
   width: 100%;

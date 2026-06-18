@@ -74,17 +74,44 @@
             <button id="newTrenchesPlayButton" class="route-tool-button">New Play</button>
             <button id="saveTrenchesPlayButton" class="route-tool-button">Save Play</button>
           </div>
-          <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
-          <select id="trenchesFrontSelect"></select>
-          <label class="field-label" for="trenchesFrontName">Front name</label>
-          <input id="trenchesFrontName" type="text" placeholder="Mint, Bear, Over...">
-          <div class="button-row">
-            <button id="newTrenchesFrontButton" class="route-tool-button">New Front</button>
-            <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
+          <div class="trenches-editor-tabs" role="tablist" aria-label="Trenches editor">
+            <button id="trenchesOffenseTab" class="route-tool-button active" data-trenches-panel-tab="offense" type="button">Edit Offense</button>
+            <button id="trenchesDefenseTab" class="route-tool-button" data-trenches-panel-tab="defense" type="button">Edit Defense</button>
           </div>
-          <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
-          <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
-          <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
+          <div id="trenchesOffensePane" class="trenches-pane active" data-trenches-pane="offense">
+            <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
+            <p class="eyebrow trenches-selected-label">Selected player</p>
+            <h3 id="trenchesSelectedName">LT</h3>
+            <label class="field-label" for="trenchesSpeedSelect">Speed</label>
+            <select id="trenchesSpeedSelect">
+              <option value="1" selected>100%</option>
+              <option value="0.75">75%</option>
+              <option value="0.5">50%</option>
+              <option value="0.25">25%</option>
+              <option value="0.1">10%</option>
+            </select>
+            <div class="button-row">
+              <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
+              <button id="clearTrenchesPathButton" class="route-tool-button danger">Clear Path</button>
+            </div>
+            <div id="trenchesAssignmentsList" class="trenches-assignment-list"></div>
+          </div>
+          <div id="trenchesDefensePane" class="trenches-pane" data-trenches-pane="defense">
+            <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
+            <select id="trenchesFrontSelect"></select>
+            <label class="field-label" for="trenchesFrontName">Front name</label>
+            <input id="trenchesFrontName" type="text" placeholder="Mint, Bear, Over...">
+            <div class="button-row">
+              <button id="newTrenchesFrontButton" class="route-tool-button">New Front</button>
+              <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
+            </div>
+            <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
+            <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
+            <div class="trenches-defender-editor">
+              <p class="eyebrow">Front defenders</p>
+              <div id="trenchesDefenderList"></div>
+            </div>
+          </div>
           <div class="button-row">
             <button id="trenchesMoveButton" class="route-tool-button active">Move</button>
             <button id="trenchesDrawButton" class="route-tool-button">Draw</button>
@@ -92,25 +119,6 @@
           <button id="addTrenchesNoteButton" class="route-tool-button">+ Note</button>
           <button id="resetTrenchesAlignmentButton" class="route-tool-button">Reset Alignment</button>
           <button id="resetTrenchesButton" class="route-tool-button">Clear Paths</button>
-          <p class="eyebrow trenches-selected-label">Selected player</p>
-          <h3 id="trenchesSelectedName">LT</h3>
-          <label class="field-label" for="trenchesSpeedSelect">Speed</label>
-          <select id="trenchesSpeedSelect">
-            <option value="1" selected>100%</option>
-            <option value="0.75">75%</option>
-            <option value="0.5">50%</option>
-            <option value="0.25">25%</option>
-            <option value="0.1">10%</option>
-          </select>
-          <div class="button-row">
-            <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
-            <button id="clearTrenchesPathButton" class="route-tool-button danger">Clear Path</button>
-          </div>
-          <div class="trenches-defender-editor">
-            <p class="eyebrow">Front defenders</p>
-            <div id="trenchesDefenderList"></div>
-          </div>
-          <div id="trenchesAssignmentsList" class="trenches-assignment-list"></div>
         </aside>
 
         <div class="trenches-board-card">
