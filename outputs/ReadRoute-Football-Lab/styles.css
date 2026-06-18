@@ -383,7 +383,14 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   width: 100%;
   display: block;
 }
-.trenches-lineman { cursor: pointer; }
+.trenches-lineman,
+.trenches-defender {
+  cursor: grab;
+}
+.trenches-lineman:active,
+.trenches-defender:active {
+  cursor: grabbing;
+}
 .trenches-assignment-list {
   margin-top: 16px;
   display: grid;

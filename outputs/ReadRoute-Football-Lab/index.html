@@ -57,11 +57,14 @@
         <div>
           <p class="eyebrow">The Trenches</p>
           <h2>O-line answers vs. fronts</h2>
-          <p>Pick a defensive front, assign every lineman, and show pull paths or climb rules.</p>
+          <p>Pick a defensive front, draw each lineman's path, and teach the rule when contact happens.</p>
         </div>
         <div class="trenches-controls">
           <label class="field-label" for="trenchesFrontSelect">Front</label>
           <select id="trenchesFrontSelect"></select>
+          <button id="runTrenchesButton" class="button button-primary">Run Trenches</button>
+          <button id="resetTrenchesPlayButton" class="route-tool-button">Reset Run</button>
+          <button id="resetTrenchesAlignmentButton" class="route-tool-button">Reset Alignment</button>
           <button id="resetTrenchesButton" class="route-tool-button">Reset Assignments</button>
         </div>
       </div>
@@ -82,15 +85,10 @@
             <option value="Kick out">Kick out</option>
             <option value="Wrap">Wrap</option>
           </select>
-          <label class="field-label" for="trenchesPullSelect">Movement</label>
-          <select id="trenchesPullSelect">
-            <option value="none">No pull</option>
-            <option value="left">Pull left</option>
-            <option value="right">Pull right</option>
-            <option value="climb">Climb vertical</option>
-            <option value="kickLeft">Kick left edge</option>
-            <option value="kickRight">Kick right edge</option>
-          </select>
+          <div class="button-row">
+            <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
+            <button id="clearTrenchesPathButton" class="route-tool-button danger">Clear Path</button>
+          </div>
           <label class="field-label" for="trenchesNoteInput">Coaching note</label>
           <textarea id="trenchesNoteInput" rows="4" placeholder="First step, eyes, target..."></textarea>
           <button id="saveTrenchesButton" class="button button-primary full-width">Save Assignment</button>
@@ -99,7 +97,7 @@
 
         <div class="trenches-board-card">
           <div id="trenchesBoard" class="trenches-board"></div>
-          <p class="field-note">Click a lineman, choose his rule, then mark pull or climb movement.</p>
+          <p class="field-note">Click a lineman, then click the board to draw his path. Click a path point to round that break. Drag players to adjust alignment.</p>
         </div>
       </div>
     </section>

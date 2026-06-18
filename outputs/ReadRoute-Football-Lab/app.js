@@ -198,6 +198,9 @@ let libraryPreview = { type: "play", id: selectedPlayId };
 let playbookTab = "all";
 let activeFolderPickerId = null;
 let trenchesState = loadTrenchesState();
+let trenchesDrag = null;
+let trenchesAnimation = null;
+let trenchesAnimationFrame = null;
 const libraryFolderOpenState = new Map();
 const runFolderOpenState = new Map();
 let saveToastTimer = null;
@@ -275,11 +278,15 @@ const els = {
   trenchesBoard: document.querySelector("#trenchesBoard"),
   trenchesSelectedName: document.querySelector("#trenchesSelectedName"),
   trenchesAssignmentSelect: document.querySelector("#trenchesAssignmentSelect"),
-  trenchesPullSelect: document.querySelector("#trenchesPullSelect"),
+  undoTrenchesPointButton: document.querySelector("#undoTrenchesPointButton"),
+  clearTrenchesPathButton: document.querySelector("#clearTrenchesPathButton"),
   trenchesNoteInput: document.querySelector("#trenchesNoteInput"),
   trenchesAssignmentsList: document.querySelector("#trenchesAssignmentsList"),
   saveTrenchesButton: document.querySelector("#saveTrenchesButton"),
   resetTrenchesButton: document.querySelector("#resetTrenchesButton"),
+  runTrenchesButton: document.querySelector("#runTrenchesButton"),
+  resetTrenchesPlayButton: document.querySelector("#resetTrenchesPlayButton"),
+  resetTrenchesAlignmentButton: document.querySelector("#resetTrenchesAlignmentButton"),
 };
 
 function readJsonStorage(key) {
@@ -295,7 +302,7 @@ function defaultTrenchesAssignments() {
   return offensiveLine.reduce((assignments, lineman) => {
     assignments[lineman.id] = {
       assignment: "Base block",
-      pull: "none",
+      path: [],
       note: ""
     };
     return assignments;
@@ -304,13 +311,28 @@ function defaultTrenchesAssignments() {
 
 function loadTrenchesState() {
   const saved = readJsonStorage(storageKeys.trenches) || {};
+  const assignments = {
+    ...defaultTrenchesAssignments(),
+    ...(saved.assignments || {})
+  };
+  offensiveLine.forEach(lineman => {
+    assignments[lineman.id] = {
+      assignment: assignments[lineman.id]?.assignment || "Base block",
+      path: Array.isArray(assignments[lineman.id]?.path)
+        ? assignments[lineman.id].path.map(point => ({
+            x: Number(point.x),
+            y: Number(point.y),
+            rounded: Boolean(point.rounded)
+          }))
+        : [],
+      note: assignments[lineman.id]?.note || ""
+    };
+  });
   return {
     frontId: trenchesFronts[saved.frontId] ? saved.frontId : "even",
     selectedId: offensiveLine.some(lineman => lineman.id === saved.selectedId) ? saved.selectedId : "LT",
-    assignments: {
-      ...defaultTrenchesAssignments(),
-      ...(saved.assignments || {})
-    }
+    assignments,
+    fronts: saved.fronts || {}
   };
 }
 
@@ -3777,15 +3799,89 @@ function renderReads() {
   }
 }
 
-function trenchesPullPath(lineman, pull) {
-  const paths = {
-    left: `M ${lineman.x} ${lineman.y} C ${lineman.x - 35} ${lineman.y + 35}, ${lineman.x - 115} ${lineman.y + 35}, ${lineman.x - 155} ${lineman.y - 15}`,
-    right: `M ${lineman.x} ${lineman.y} C ${lineman.x + 35} ${lineman.y + 35}, ${lineman.x + 115} ${lineman.y + 35}, ${lineman.x + 155} ${lineman.y - 15}`,
-    climb: `M ${lineman.x} ${lineman.y} L ${lineman.x} ${lineman.y - 145}`,
-    kickLeft: `M ${lineman.x} ${lineman.y} C ${lineman.x - 45} ${lineman.y + 20}, ${lineman.x - 120} ${lineman.y - 8}, ${lineman.x - 170} ${lineman.y - 55}`,
-    kickRight: `M ${lineman.x} ${lineman.y} C ${lineman.x + 45} ${lineman.y + 20}, ${lineman.x + 120} ${lineman.y - 8}, ${lineman.x + 170} ${lineman.y - 55}`
+function defaultTrenchesPositions(frontId = trenchesState.frontId) {
+  const front = trenchesFronts[frontId] || trenchesFronts.even;
+  return {
+    offense: offensiveLine.map(lineman => ({
+      id: lineman.id,
+      label: lineman.id,
+      x: 250 + ((lineman.x - 370) * 1.35),
+      y: 315
+    })),
+    defense: front.defenders.map((defender, index) => ({
+      id: `D${index}`,
+      label: defender.label,
+      x: 250 + ((defender.x - 330) * 1.15),
+      y: defender.y
+    }))
   };
-  return paths[pull] || "";
+}
+
+function trenchesPositions(frontId = trenchesState.frontId) {
+  const saved = trenchesState.fronts?.[frontId];
+  const defaults = defaultTrenchesPositions(frontId);
+  return {
+    offense: defaults.offense.map(player => ({
+      ...player,
+      ...(saved?.offense?.find(item => item.id === player.id) || {})
+    })),
+    defense: defaults.defense.map(player => ({
+      ...player,
+      ...(saved?.defense?.find(item => item.id === player.id) || {})
+    }))
+  };
+}
+
+function setTrenchesPositions(frontId, positions) {
+  trenchesState.fronts ||= {};
+  trenchesState.fronts[frontId] = structuredClone(positions);
+  saveTrenchesState();
+}
+
+function trenchesPointFromEvent(event) {
+  const svg = els.trenchesBoard.querySelector("svg");
+  const point = svg.createSVGPoint();
+  point.x = event.clientX;
+  point.y = event.clientY;
+  const transformed = point.matrixTransform(svg.getScreenCTM().inverse());
+  return {
+    x: Math.max(70, Math.min(830, Math.round(transformed.x))),
+    y: Math.max(70, Math.min(465, Math.round(transformed.y)))
+  };
+}
+
+function trenchesEndPoint(player, side) {
+  if (side === "offense") {
+    const path = trenchesState.assignments[player.id]?.path || [];
+    return path.length ? path[path.length - 1] : { x: player.x, y: player.y };
+  }
+  return { x: player.x, y: Math.min(360, player.y + 75) };
+}
+
+function pathLength(start, points) {
+  return [start, ...points].slice(1).reduce((total, point, index, path) =>
+    total + Math.hypot(point.x - path[index].x, point.y - path[index].y), 0);
+}
+
+function pointOnPath(start, points, progress) {
+  if (!points.length) return start;
+  const path = [start, ...points];
+  const total = pathLength(start, points) || 1;
+  let target = total * progress;
+  for (let index = 0; index < path.length - 1; index += 1) {
+    const from = path[index];
+    const to = path[index + 1];
+    const segment = Math.hypot(to.x - from.x, to.y - from.y);
+    if (target <= segment) {
+      const ratio = segment ? target / segment : 0;
+      return {
+        x: from.x + ((to.x - from.x) * ratio),
+        y: from.y + ((to.y - from.y) * ratio)
+      };
+    }
+    target -= segment;
+  }
+  return path[path.length - 1];
 }
 
 function renderTrenches() {
@@ -3798,21 +3894,12 @@ function renderTrenches() {
   const selectedAssignment = trenchesState.assignments[trenchesState.selectedId];
   els.trenchesSelectedName.textContent = trenchesState.selectedId;
   els.trenchesAssignmentSelect.value = selectedAssignment.assignment;
-  els.trenchesPullSelect.value = selectedAssignment.pull;
   els.trenchesNoteInput.value = selectedAssignment.note || "";
 
-  const front = trenchesFronts[trenchesState.frontId];
-  const ol = offensiveLine.map(lineman => ({
-    ...lineman,
-    x: 250 + ((lineman.x - 370) * 1.35),
-    y: 315
-  }));
+  const positions = trenchesAnimation?.positions || trenchesPositions(trenchesState.frontId);
+  const ol = positions.offense;
   const qb = { label: "QB", x: 450, y: 405 };
-  const defenders = front.defenders.map(defender => ({
-    ...defender,
-    x: 250 + ((defender.x - 330) * 1.15),
-    y: defender.y
-  }));
+  const defenders = positions.defense;
 
   els.trenchesBoard.innerHTML = `
     <svg viewBox="0 0 900 520" role="img" aria-label="The Trenches front and offensive line board">
@@ -3825,20 +3912,26 @@ function renderTrenches() {
       <line x1="80" y1="300" x2="820" y2="300" stroke="rgba(255,255,255,.9)" stroke-width="4"></line>
       <text x="82" y="292" fill="#dbe8df" font-size="12" font-weight="800">LINE OF SCRIMMAGE</text>
       ${defenders.map(defender => `
-        <g>
-          <circle cx="${defender.x}" cy="${defender.y}" r="24" fill="#103049" stroke="#76d7ff" stroke-width="3"></circle>
-          <text x="${defender.x}" y="${defender.y + 5}" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="900">${escapeHtml(defender.label)}</text>
+        <g class="trenches-defender" data-trenches-defender="${defender.id}" transform="translate(${defender.x} ${defender.y})">
+          <circle cx="0" cy="0" r="24" fill="#103049" stroke="#76d7ff" stroke-width="3"></circle>
+          <text x="0" y="5" text-anchor="middle" fill="#ffffff" font-size="13" font-weight="900">${escapeHtml(defender.label)}</text>
         </g>
       `).join("")}
       ${ol.map(lineman => {
         const assignment = trenchesState.assignments[lineman.id];
-        const path = trenchesPullPath(lineman, assignment.pull);
+        const pathData = routePathData(lineman, assignment.path || []);
         return `
-          ${path ? `<path d="${path}" fill="none" stroke="#f2c35a" stroke-width="6" stroke-linecap="round" marker-end="url(#trenchArrow)"></path>` : ""}
-          <g class="trenches-lineman ${trenchesState.selectedId === lineman.id ? "selected" : ""}" data-trenches-lineman="${lineman.id}">
-            <rect x="${lineman.x - 27}" y="${lineman.y - 27}" width="54" height="54" rx="10" fill="#c9f45c" stroke="${trenchesState.selectedId === lineman.id ? "#ffffff" : "#102016"}" stroke-width="${trenchesState.selectedId === lineman.id ? 5 : 2}"></rect>
-            <text x="${lineman.x}" y="${lineman.y + 5}" text-anchor="middle" fill="#102016" font-size="15" font-weight="950">${lineman.id}</text>
-            <text x="${lineman.x}" y="${lineman.y + 50}" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="850">${escapeHtml(assignment.assignment)}</text>
+          ${assignment.path?.length ? `<path d="${pathData}" fill="none" stroke="#f2c35a" stroke-width="6" stroke-linecap="round" marker-end="url(#trenchArrow)"></path>` : ""}
+          ${(assignment.path || []).map((point, index) => `
+            <g class="trenches-path-point" data-trenches-point="${lineman.id}" data-point-index="${index}">
+              <circle cx="${point.x}" cy="${point.y}" r="9" fill="${point.rounded ? "#c9f45c" : "#fffdf7"}" stroke="#102016" stroke-width="2"></circle>
+              <text x="${point.x}" y="${point.y + 3}" text-anchor="middle" fill="#102016" font-size="8" font-weight="950">${index + 1}</text>
+            </g>
+          `).join("")}
+          <g class="trenches-lineman ${trenchesState.selectedId === lineman.id ? "selected" : ""}" data-trenches-lineman="${lineman.id}" transform="translate(${lineman.x} ${lineman.y})">
+            <rect x="-27" y="-27" width="54" height="54" rx="10" fill="#c9f45c" stroke="${trenchesState.selectedId === lineman.id ? "#ffffff" : "#102016"}" stroke-width="${trenchesState.selectedId === lineman.id ? 5 : 2}"></rect>
+            <text x="0" y="5" text-anchor="middle" fill="#102016" font-size="15" font-weight="950">${lineman.id}</text>
+            <text x="0" y="50" text-anchor="middle" fill="#ffffff" font-size="11" font-weight="850">${escapeHtml(assignment.assignment)}</text>
           </g>
         `;
       }).join("")}
@@ -3855,6 +3948,22 @@ function renderTrenches() {
       saveTrenchesState();
       renderTrenches();
     });
+    node.addEventListener("pointerdown", event => startTrenchesDrag(event, "offense", node.dataset.trenchesLineman));
+  });
+  els.trenchesBoard.querySelectorAll("[data-trenches-defender]").forEach(node => {
+    node.addEventListener("pointerdown", event => startTrenchesDrag(event, "defense", node.dataset.trenchesDefender));
+  });
+  els.trenchesBoard.querySelectorAll("[data-trenches-point]").forEach(node => {
+    node.addEventListener("click", event => {
+      event.stopPropagation();
+      const assignment = trenchesState.assignments[node.dataset.trenchesPoint];
+      const point = assignment?.path?.[Number(node.dataset.pointIndex)];
+      if (!point) return;
+      point.rounded = !point.rounded;
+      trenchesState.selectedId = node.dataset.trenchesPoint;
+      saveTrenchesState();
+      renderTrenches();
+    });
   });
 
   els.trenchesAssignmentsList.innerHTML = offensiveLine.map(lineman => {
@@ -3862,7 +3971,7 @@ function renderTrenches() {
     return `
       <button class="trenches-assignment-chip ${trenchesState.selectedId === lineman.id ? "active" : ""}" data-trenches-select="${lineman.id}">
         <strong>${lineman.id}</strong>
-        <span>${escapeHtml(assignment.assignment)}${assignment.pull !== "none" ? ` | ${escapeHtml(assignment.pull)}` : ""}</span>
+        <span>${escapeHtml(assignment.assignment)} | ${(assignment.path || []).length} points</span>
       </button>
     `;
   }).join("");
@@ -3873,6 +3982,99 @@ function renderTrenches() {
       renderTrenches();
     });
   });
+}
+
+function startTrenchesDrag(event, side, id) {
+  if (trenchesAnimationFrame) return;
+  event.preventDefault();
+  event.stopPropagation();
+  const point = trenchesPointFromEvent(event);
+  const positions = trenchesPositions(trenchesState.frontId);
+  const list = side === "offense" ? positions.offense : positions.defense;
+  const player = list.find(item => item.id === id);
+  if (!player) return;
+  const svg = els.trenchesBoard.querySelector("svg");
+  svg.setPointerCapture(event.pointerId);
+  trenchesDrag = {
+    side,
+    id,
+    pointerId: event.pointerId,
+    offsetX: point.x - player.x,
+    offsetY: point.y - player.y
+  };
+}
+
+function updateTrenchesDrag(event) {
+  if (!trenchesDrag) return;
+  const point = trenchesPointFromEvent(event);
+  const positions = trenchesPositions(trenchesState.frontId);
+  const list = trenchesDrag.side === "offense" ? positions.offense : positions.defense;
+  const player = list.find(item => item.id === trenchesDrag.id);
+  if (!player) return;
+  player.x = point.x - trenchesDrag.offsetX;
+  player.y = point.y - trenchesDrag.offsetY;
+  if (trenchesDrag.side === "offense") player.y = Math.max(260, Math.min(390, player.y));
+  setTrenchesPositions(trenchesState.frontId, positions);
+  const selector = trenchesDrag.side === "offense"
+    ? `[data-trenches-lineman="${trenchesDrag.id}"]`
+    : `[data-trenches-defender="${trenchesDrag.id}"]`;
+  els.trenchesBoard.querySelector(selector)
+    ?.setAttribute("transform", `translate(${player.x} ${player.y})`);
+}
+
+function finishTrenchesDrag(event) {
+  if (!trenchesDrag) return;
+  const svg = els.trenchesBoard.querySelector("svg");
+  if (svg?.hasPointerCapture(trenchesDrag.pointerId)) {
+    svg.releasePointerCapture(trenchesDrag.pointerId);
+  }
+  trenchesDrag = null;
+  renderTrenches();
+}
+
+function runTrenchesPlay() {
+  const start = trenchesPositions(trenchesState.frontId);
+  const duration = 1600;
+  const startedAt = performance.now();
+  cancelAnimationFrame(trenchesAnimationFrame);
+  const tick = now => {
+    const progress = Math.min(1, (now - startedAt) / duration);
+    const ease = 1 - Math.pow(1 - progress, 3);
+    trenchesAnimation = {
+      positions: {
+        offense: start.offense.map(player => {
+          const path = trenchesState.assignments[player.id]?.path || [];
+          return { ...player, ...pointOnPath(player, path, ease) };
+        }),
+        defense: start.defense.map(player => {
+          let driven = { ...player };
+          start.offense.forEach(lineman => {
+            const path = trenchesState.assignments[lineman.id]?.path || [];
+            const blocker = { ...lineman, ...pointOnPath(lineman, path, ease) };
+            const distance = Math.hypot(blocker.x - player.x, blocker.y - player.y);
+            if (distance < 52 && path.length) {
+              const drive = 42 * ease;
+              driven.x += ((blocker.x - player.x) * .08);
+              driven.y += drive;
+            }
+          });
+          driven.y = Math.min(405, driven.y);
+          return driven;
+        })
+      }
+    };
+    renderTrenches();
+    if (progress < 1) trenchesAnimationFrame = requestAnimationFrame(tick);
+    else trenchesAnimationFrame = null;
+  };
+  trenchesAnimationFrame = requestAnimationFrame(tick);
+}
+
+function resetTrenchesRun() {
+  cancelAnimationFrame(trenchesAnimationFrame);
+  trenchesAnimationFrame = null;
+  trenchesAnimation = null;
+  renderTrenches();
 }
 
 function escapeHtml(value) {
@@ -5780,6 +5982,7 @@ document.querySelector("#scenarioResetButton").addEventListener("click", () => {
 });
 
 els.trenchesFrontSelect?.addEventListener("change", event => {
+  resetTrenchesRun();
   trenchesState.frontId = event.target.value;
   saveTrenchesState();
   renderTrenches();
@@ -5788,14 +5991,12 @@ els.trenchesFrontSelect?.addEventListener("change", event => {
 function updateSelectedTrenchesAssignment() {
   const assignment = trenchesState.assignments[trenchesState.selectedId];
   assignment.assignment = els.trenchesAssignmentSelect.value;
-  assignment.pull = els.trenchesPullSelect.value;
   assignment.note = els.trenchesNoteInput.value;
   saveTrenchesState();
   renderTrenches();
 }
 
 els.trenchesAssignmentSelect?.addEventListener("change", updateSelectedTrenchesAssignment);
-els.trenchesPullSelect?.addEventListener("change", updateSelectedTrenchesAssignment);
 els.trenchesNoteInput?.addEventListener("input", () => {
   trenchesState.assignments[trenchesState.selectedId].note = els.trenchesNoteInput.value;
   saveTrenchesState();
@@ -5805,11 +6006,45 @@ els.saveTrenchesButton?.addEventListener("click", () => {
   showSaveSuccess("Trenches assignment saved");
 });
 els.resetTrenchesButton?.addEventListener("click", () => {
+  resetTrenchesRun();
   trenchesState.assignments = defaultTrenchesAssignments();
   saveTrenchesState();
   renderTrenches();
   showSaveSuccess("Trenches assignments reset");
 });
+els.resetTrenchesAlignmentButton?.addEventListener("click", () => {
+  resetTrenchesRun();
+  trenchesState.fronts ||= {};
+  delete trenchesState.fronts[trenchesState.frontId];
+  saveTrenchesState();
+  renderTrenches();
+  showSaveSuccess("Trenches alignment reset");
+});
+els.runTrenchesButton?.addEventListener("click", runTrenchesPlay);
+els.resetTrenchesPlayButton?.addEventListener("click", resetTrenchesRun);
+els.undoTrenchesPointButton?.addEventListener("click", () => {
+  trenchesState.assignments[trenchesState.selectedId]?.path?.pop();
+  saveTrenchesState();
+  renderTrenches();
+});
+els.clearTrenchesPathButton?.addEventListener("click", () => {
+  trenchesState.assignments[trenchesState.selectedId].path = [];
+  saveTrenchesState();
+  renderTrenches();
+});
+els.trenchesBoard?.addEventListener("click", event => {
+  if (trenchesAnimationFrame || trenchesDrag) return;
+  if (event.target.closest("[data-trenches-lineman], [data-trenches-defender], [data-trenches-point]")) return;
+  const point = trenchesPointFromEvent(event);
+  const assignment = trenchesState.assignments[trenchesState.selectedId];
+  assignment.path ||= [];
+  assignment.path.push({ ...point, rounded: false });
+  saveTrenchesState();
+  renderTrenches();
+});
+els.trenchesBoard?.addEventListener("pointermove", updateTrenchesDrag);
+els.trenchesBoard?.addEventListener("pointerup", finishTrenchesDrag);
+els.trenchesBoard?.addEventListener("pointercancel", finishTrenchesDrag);
 
 document.querySelectorAll("[data-app-tab]").forEach(button => {
   button.addEventListener("click", () => {
