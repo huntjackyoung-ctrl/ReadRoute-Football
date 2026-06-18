@@ -82,6 +82,8 @@
             <button id="newTrenchesFrontButton" class="route-tool-button">New Front</button>
             <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
           </div>
+          <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
+          <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
           <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
           <div class="button-row">
             <button id="trenchesMoveButton" class="route-tool-button active">Move</button>
@@ -94,10 +96,11 @@
           <h3 id="trenchesSelectedName">LT</h3>
           <label class="field-label" for="trenchesSpeedSelect">Speed</label>
           <select id="trenchesSpeedSelect">
-            <option value="0.6">Slow</option>
-            <option value="0.85">Controlled</option>
-            <option value="1" selected>Normal</option>
-            <option value="1.2">Fast</option>
+            <option value="1" selected>100%</option>
+            <option value="0.75">75%</option>
+            <option value="0.5">50%</option>
+            <option value="0.25">25%</option>
+            <option value="0.1">10%</option>
           </select>
           <div class="button-row">
             <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>

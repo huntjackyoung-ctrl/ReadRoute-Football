@@ -264,6 +264,8 @@ const els = {
   saveTrenchesPlayButton: document.querySelector("#saveTrenchesPlayButton"),
   newTrenchesFrontButton: document.querySelector("#newTrenchesFrontButton"),
   saveTrenchesFrontButton: document.querySelector("#saveTrenchesFrontButton"),
+  deleteTrenchesFrontButton: document.querySelector("#deleteTrenchesFrontButton"),
+  addTrenchesOffenseButton: document.querySelector("#addTrenchesOffenseButton"),
   addTrenchesDefenderButton: document.querySelector("#addTrenchesDefenderButton"),
   trenchesMoveButton: document.querySelector("#trenchesMoveButton"),
   trenchesDrawButton: document.querySelector("#trenchesDrawButton"),
@@ -291,14 +293,21 @@ function readJsonStorage(key) {
 }
 
 function defaultTrenchesAssignments() {
-  return offensiveLine.reduce((assignments, lineman) => {
-    assignments[lineman.id] = {
+  return defaultTrenchesOffensePlayers().reduce((assignments, player) => {
+    assignments[player.id] = {
       path: [],
       targetId: "",
       speed: 1
     };
     return assignments;
   }, {});
+}
+
+function defaultTrenchesOffensePlayers() {
+  return [
+    ...offensiveLine.map(lineman => ({ id: lineman.id, label: lineman.id })),
+    { id: "QB", label: "QB" }
+  ];
 }
 
 function createBlankTrenchesPlay(name = "Untitled Trench Play") {
@@ -324,17 +333,18 @@ function loadTrenchesState() {
     ...defaultTrenchesAssignments(),
     ...((savedPlay?.assignments || saved.assignments) || {})
   };
-  offensiveLine.forEach(lineman => {
-    assignments[lineman.id] = {
-      path: Array.isArray(assignments[lineman.id]?.path)
-        ? assignments[lineman.id].path.map(point => ({
+  defaultTrenchesOffensePlayers().forEach(player => {
+    assignments[player.id] ||= { path: [], targetId: "", speed: 1 };
+    assignments[player.id] = {
+      path: Array.isArray(assignments[player.id]?.path)
+        ? assignments[player.id].path.map(point => ({
             x: Number(point.x),
             y: Number(point.y),
             rounded: Boolean(point.rounded)
           }))
         : [],
-      targetId: assignments[lineman.id]?.targetId || "",
-      speed: Number(assignments[lineman.id]?.speed) || 1
+      targetId: assignments[player.id]?.targetId || "",
+      speed: Number(assignments[player.id]?.speed) || 1
     };
   });
   const defensePathsSource = savedPlay?.defensePaths || saved.defensePaths || {};
@@ -3837,11 +3847,11 @@ function defaultTrenchesPositions(frontId = trenchesState.frontId) {
   const customFront = Boolean(trenchesState?.customFronts?.[frontId]);
   const olX = { LT: 300, LG: 375, C: 450, RG: 525, RT: 600 };
   return {
-    offense: offensiveLine.map(lineman => ({
-      id: lineman.id,
-      label: lineman.id,
-      x: olX[lineman.id] || 450,
-      y: 300
+    offense: defaultTrenchesOffensePlayers().map(player => ({
+      id: player.id,
+      label: player.label,
+      x: player.id === "QB" ? 450 : olX[player.id] || 450,
+      y: player.id === "QB" ? 405 : 300
     })),
     defense: front.defenders.map((defender, index) => ({
       id: defender.id || `D${index}`,
@@ -3855,12 +3865,16 @@ function defaultTrenchesPositions(frontId = trenchesState.frontId) {
 function trenchesPositions(frontId = trenchesState.frontId) {
   const saved = trenchesState.fronts?.[frontId];
   const defaults = defaultTrenchesPositions(frontId);
+  const defaultOffenseIds = new Set(defaults.offense.map(player => player.id));
   const defaultDefenseIds = new Set(defaults.defense.map(player => player.id));
   return {
-    offense: defaults.offense.map(player => ({
-      ...player,
-      ...(saved?.offense?.find(item => item.id === player.id) || {})
-    })),
+    offense: [
+      ...defaults.offense.map(player => ({
+        ...player,
+        ...(saved?.offense?.find(item => item.id === player.id) || {})
+      })),
+      ...((saved?.offense || []).filter(player => !defaultOffenseIds.has(player.id)))
+    ],
     defense: [
       ...defaults.defense.map(player => ({
         ...player,
@@ -3934,6 +3948,37 @@ function selectedTrenchesMovement() {
   }
   trenchesState.assignments[trenchesState.selectedId] ||= { path: [], targetId: "", speed: 1 };
   return trenchesState.assignments[trenchesState.selectedId];
+}
+
+function deleteTrenchesOffensePlayer(playerId) {
+  const positions = trenchesPositions(trenchesState.frontId);
+  positions.offense = positions.offense.filter(player => player.id !== playerId);
+  setTrenchesPositions(trenchesState.frontId, positions);
+  delete trenchesState.assignments[playerId];
+  if (trenchesState.selectedSide === "offense" && trenchesState.selectedId === playerId) {
+    updateTrenchesSelection("LT", "offense");
+  } else {
+    saveTrenchesState();
+  }
+  renderTrenches();
+}
+
+function deleteCurrentTrenchesFront() {
+  if (trenchesState.frontId === "starter") {
+    window.alert("The starter front stays as your blank starting point. Save a custom front first, then you can delete it.");
+    return;
+  }
+  const frontName = trenchesFrontOptions()[trenchesState.frontId]?.name || "this front";
+  if (!window.confirm(`Delete ${frontName}?`)) return;
+  delete trenchesState.customFronts?.[trenchesState.frontId];
+  delete trenchesState.fronts?.[trenchesState.frontId];
+  trenchesState.plays.forEach(play => {
+    if (play.frontId === trenchesState.frontId) play.frontId = "starter";
+  });
+  trenchesState.frontId = "starter";
+  saveTrenchesState();
+  renderTrenches();
+  showSaveSuccess("Front deleted");
 }
 
 function saveTrenchesPlayFromState(nameOverride = "") {
@@ -4061,7 +4106,6 @@ function renderTrenches() {
 
   const positions = trenchesAnimation?.positions || trenchesPositions(trenchesState.frontId);
   const ol = positions.offense;
-  const qb = { label: "QB", x: 450, y: 405 };
   const defenders = positions.defense;
   const notes = trenchesState.notes || [];
 
@@ -4125,10 +4169,6 @@ function renderTrenches() {
           </g>
         `;
       }).join("")}
-      <g>
-        <circle cx="${qb.x}" cy="${qb.y}" r="22" fill="#153e5a" stroke="#76d7ff" stroke-width="3"></circle>
-        <text x="${qb.x}" y="${qb.y + 5}" text-anchor="middle" fill="#fff" font-size="13" font-weight="900">QB</text>
-      </g>
       ${notes.map(note => {
         const dimensions = noteDimensions(note.text || "");
         note.width = dimensions.width;
@@ -4161,7 +4201,17 @@ function renderTrenches() {
       event.stopPropagation();
       if (trenchesState.mode === "draw" && trenchesState.selectedSide === "offense") {
         const assignment = trenchesState.assignments[trenchesState.selectedId];
-        assignment.targetId = assignment.targetId === node.dataset.trenchesDefender ? "" : node.dataset.trenchesDefender;
+        const defenderId = node.dataset.trenchesDefender;
+        const positions = trenchesPositions(trenchesState.frontId);
+        const defender = positions.defense.find(item => item.id === defenderId);
+        assignment.targetId = assignment.targetId === defenderId ? "" : defenderId;
+        if (assignment.targetId && defender) {
+          assignment.path ||= [];
+          const last = assignment.path[assignment.path.length - 1];
+          if (!last || Math.hypot(last.x - defender.x, last.y - defender.y) > 8) {
+            assignment.path.push({ x: defender.x, y: defender.y, rounded: false });
+          }
+        }
       } else {
         updateTrenchesSelection(node.dataset.trenchesDefender, "defense");
       }
@@ -4195,12 +4245,14 @@ function renderTrenches() {
     });
   });
 
-  els.trenchesAssignmentsList.innerHTML = offensiveLine.map(lineman => {
+  const baseOffenseIds = new Set(defaultTrenchesOffensePlayers().map(player => player.id));
+  els.trenchesAssignmentsList.innerHTML = ol.map(lineman => {
     const assignment = trenchesState.assignments[lineman.id];
     return `
       <button class="trenches-assignment-chip ${trenchesState.selectedSide === "offense" && trenchesState.selectedId === lineman.id ? "active" : ""}" data-trenches-select="${lineman.id}">
-        <strong>${lineman.id}</strong>
-        <span>${(assignment.path || []).length} path pts${assignment.targetId ? " | target locked" : ""}</span>
+        <strong>${escapeHtml(lineman.label || lineman.id)}</strong>
+        <span>${(assignment?.path || []).length} path pts${assignment?.targetId ? " | target locked" : ""}</span>
+        ${baseOffenseIds.has(lineman.id) ? "" : `<span class="trenches-delete-inline" data-delete-trenches-offense="${lineman.id}">Delete</span>`}
       </button>
     `;
   }).join("");
@@ -4208,6 +4260,12 @@ function renderTrenches() {
     button.addEventListener("click", () => {
       updateTrenchesSelection(button.dataset.trenchesSelect, "offense");
       renderTrenches();
+    });
+  });
+  els.trenchesAssignmentsList.querySelectorAll("[data-delete-trenches-offense]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.stopPropagation();
+      deleteTrenchesOffensePlayer(button.dataset.deleteTrenchesOffense);
     });
   });
 
@@ -4245,9 +4303,18 @@ function renderTrenches() {
     button.addEventListener("click", () => {
       const frontId = editableTrenchesFrontId();
       if (!frontId) return;
+      const defenderId = button.dataset.deleteTrenchesDefender;
       const positions = trenchesPositions(trenchesState.frontId);
-      positions.defense = positions.defense.filter(item => item.id !== button.dataset.deleteTrenchesDefender);
+      positions.defense = positions.defense.filter(item => item.id !== defenderId);
       setTrenchesPositions(trenchesState.frontId, positions);
+      delete trenchesState.defensePaths?.[defenderId];
+      Object.values(trenchesState.assignments).forEach(assignment => {
+        if (assignment.targetId === defenderId) assignment.targetId = "";
+      });
+      if (trenchesState.selectedSide === "defense" && trenchesState.selectedId === defenderId) {
+        trenchesState.selectedSide = "offense";
+        trenchesState.selectedId = "LT";
+      }
       saveCurrentTrenchesFront();
       renderTrenches();
     });
@@ -4382,11 +4449,11 @@ function runTrenchesPlay() {
           const assignment = trenchesState.assignments[player.id] || {};
           const path = assignment.path || [];
           const target = start.defense.find(defender => defender.id === assignment.targetId);
-          const contactPoint = target ? pointOnPath(player, [...path, { x: target.x, y: target.y }], .72) : null;
+          const effectivePath = path.length ? path : target ? [{ x: target.x, y: target.y, rounded: false }] : [];
           const rawProgress = trenchProgress(ease, assignment.speed || 1);
           const engaged = target && rawProgress > .55;
           const slowedProgress = engaged ? .55 + ((rawProgress - .55) * .45) : rawProgress;
-          const point = pointOnPath(player, path, Math.min(1, slowedProgress));
+          const point = pointOnPath(player, effectivePath, Math.min(1, slowedProgress));
           return { ...player, ...point, engagedTargetId: engaged ? assignment.targetId : "" };
         }),
         defense: start.defense.map(player => {
@@ -4401,10 +4468,11 @@ function runTrenchesPlay() {
             const path = assignment.path || [];
             const rawProgress = trenchProgress(ease, assignment.speed || 1);
             const targetLock = assignment.targetId === player.id;
-            const blocker = { ...lineman, ...pointOnPath(lineman, path, targetLock ? Math.min(1, .55 + ((rawProgress - .55) * .45)) : rawProgress) };
+            const effectivePath = path.length ? path : targetLock ? [{ x: player.x, y: player.y, rounded: false }] : [];
+            const blocker = { ...lineman, ...pointOnPath(lineman, effectivePath, targetLock ? Math.min(1, .55 + ((rawProgress - .55) * .45)) : rawProgress) };
             const distance = Math.hypot(blocker.x - driven.x, blocker.y - driven.y);
-            if ((distance < 66 || targetLock) && (path.length || targetLock)) {
-              const previous = pointOnPath(lineman, path, Math.max(0, rawProgress - .05));
+            if (distance < 66 && effectivePath.length) {
+              const previous = pointOnPath(lineman, effectivePath, Math.max(0, rawProgress - .05));
               const dx = blocker.x - previous.x;
               const dy = blocker.y - previous.y || -1;
               const length = Math.hypot(dx, dy) || 1;
@@ -6425,6 +6493,26 @@ els.saveTrenchesFrontButton?.addEventListener("click", () => {
   }
   renderTrenches();
   showSaveSuccess("Front saved");
+});
+
+els.deleteTrenchesFrontButton?.addEventListener("click", deleteCurrentTrenchesFront);
+
+els.addTrenchesOffenseButton?.addEventListener("click", () => {
+  resetTrenchesRun();
+  const positions = trenchesPositions(trenchesState.frontId);
+  const count = positions.offense.filter(player => String(player.id).startsWith("O")).length + 1;
+  const newPlayer = {
+    id: `O${crypto.randomUUID().slice(0, 8)}`,
+    label: `O${count}`,
+    x: 450,
+    y: 360
+  };
+  positions.offense.push(newPlayer);
+  setTrenchesPositions(trenchesState.frontId, positions);
+  trenchesState.assignments[newPlayer.id] = { path: [], targetId: "", speed: 1 };
+  updateTrenchesSelection(newPlayer.id, "offense");
+  renderTrenches();
+  showSaveSuccess("Offensive player added");
 });
 
 els.addTrenchesDefenderButton?.addEventListener("click", () => {

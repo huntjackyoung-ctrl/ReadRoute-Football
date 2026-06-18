@@ -450,7 +450,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 .trenches-assignment-chip {
   padding: 9px 10px;
   display: grid;
-  grid-template-columns: 42px 1fr;
+  grid-template-columns: 42px 1fr auto;
   gap: 8px;
   align-items: center;
   border: 1px solid #d7dccd;
@@ -467,6 +467,10 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   color: var(--muted);
   font-size: 10px;
   font-weight: 850;
+}
+.trenches-delete-inline {
+  color: var(--orange) !important;
+  text-transform: uppercase;
 }
 .trenches-assignment-chip.active {
   border-color: var(--green);
