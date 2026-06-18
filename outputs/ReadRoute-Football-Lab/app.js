@@ -4605,18 +4605,18 @@ function runTrenchesPlay() {
     const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
     return trenchMovementDurationMs(player, movement.path || [], playbackSpeed, false);
   });
-  const duration = Math.max(2500, Math.min(30000, ...offenseDurations, ...defenseDurations) + 450);
+  const duration = Math.max(2500, ...offenseDurations, ...defenseDurations) + 600;
+  const safetyDuration = Math.max(duration + 2000, 120000);
   const startedAt = performance.now();
   cancelAnimationFrame(trenchesAnimationFrame);
   const tick = now => {
     const elapsedMs = now - startedAt;
-    const progress = Math.min(1, elapsedMs / duration);
     const offensePositions = start.offense.map(player => {
       const assignment = trenchesState.assignments[player.id] || {};
       const target = start.defense.find(defender => defender.id === assignment.targetId);
       const path = trenchPathForPlayer(player, assignment, target ? defenderTrenchDestination(target) : null);
       const contactSoon = target && Math.hypot(player.x - target.x, player.y - target.y) < 75;
-      return trenchTravelPoint(player, path, elapsedMs, playbackSpeed, contactSoon && progress > .18);
+      return trenchTravelPoint(player, path, elapsedMs, playbackSpeed, contactSoon && elapsedMs > 250);
     });
     const defenseBase = start.defense.map(player => {
       const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
@@ -4660,7 +4660,11 @@ function runTrenchesPlay() {
       }
     };
     renderTrenches();
-    if (progress < 1) trenchesAnimationFrame = requestAnimationFrame(tick);
+    const allFinished = [
+      ...offensePositions.map(player => player.travelProgress ?? 1),
+      ...defensePositions.map(player => player.travelProgress ?? 1)
+    ].every(value => value >= .999);
+    if (!allFinished && elapsedMs < safetyDuration) trenchesAnimationFrame = requestAnimationFrame(tick);
     else trenchesAnimationFrame = null;
   };
   trenchesAnimationFrame = requestAnimationFrame(tick);
