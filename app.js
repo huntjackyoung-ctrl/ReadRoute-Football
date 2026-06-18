@@ -1196,6 +1196,15 @@ function customLibraryFileMarkup(item, folderId) {
 }
 
 function folderPlayPickerMarkup(folderId) {
+  const folderItemButton = (key, included, addLabel = "Add", removeLabel = "Remove") => `
+    <button
+      class="folder-picker-action ${included ? "is-selected" : ""}"
+      data-toggle-folder-item="${key}"
+      data-folder-id="${folderId}"
+      data-folder-included="${included ? "true" : "false"}"
+    >${included ? removeLabel : addLabel}</button>
+  `;
+
   const formationGroups = formations.map(formation => {
     const formationKey = libraryItemKey("formation", formation.id);
     const formationSelected = itemFolderIds(formationKey).includes(folderId);
@@ -1209,41 +1218,33 @@ function folderPlayPickerMarkup(folderId) {
     return `
       <div class="folder-formation-picker">
         <div class="folder-formation-picker-header">
-          <label class="folder-formation-name-option">
-            <input
-              type="checkbox"
-              data-folder-membership="${folderId}"
-              data-membership-item="${formationKey}"
-              ${formationSelected ? "checked" : ""}
-              aria-label="Add ${escapeHtml(formation.name)} formation"
-            >
+          <div class="folder-formation-name-option">
+            <span class="folder-picker-badge">Formation</span>
             <span>${escapeHtml(formation.name)}</span>
-          </label>
+          </div>
           <small>${selectedCount}/${formationPlays.length} plays selected</small>
+          ${folderItemButton(formationKey, formationSelected, "Add Formation", "Remove Formation")}
         </div>
         <div class="folder-formation-play-list">
           ${formationPlays.length ? `
-            <label class="folder-all-plays-option">
-              <input
-                type="checkbox"
-                data-folder-formation-plays-membership="${folderId}"
-                data-membership-formation="${formation.id}"
-                ${allSelected ? "checked" : ""}
-              >
+            <div class="folder-picker-row folder-all-plays-option">
               <span>All plays in ${escapeHtml(formation.name)}</span>
-            </label>
+              <button
+                class="folder-picker-action ${allSelected ? "is-selected" : ""}"
+                data-toggle-formation-plays="${formation.id}"
+                data-folder-id="${folderId}"
+                data-folder-included="${allSelected ? "true" : "false"}"
+              >${allSelected ? "Remove All Plays" : "Add All Plays"}</button>
+            </div>
             ${formationPlays.map(play => {
               const key = libraryItemKey("play", play.id);
+              const included = itemFolderIds(key).includes(folderId);
               return `
-                <label>
-                  <input
-                    type="checkbox"
-                    data-folder-membership="${folderId}"
-                    data-membership-item="${key}"
-                    ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
-                  >
+                <div class="folder-picker-row">
+                  <span class="folder-picker-badge">Play</span>
                   <span>${escapeHtml(play.name)}</span>
-                </label>
+                  ${folderItemButton(key, included, "Add Play", "Remove Play")}
+                </div>
               `;
             }).join("")}
           ` : `<p class="library-empty">No plays saved for this formation. You can still add the formation above.</p>`}
@@ -1272,16 +1273,13 @@ function folderPlayPickerMarkup(folderId) {
             <div class="folder-other-file-list">
               ${otherItems.map(item => {
                 const key = libraryItemKey(item.type, item.id);
+                const included = itemFolderIds(key).includes(folderId);
                 return `
-                  <label>
-                    <input
-                      type="checkbox"
-                      data-folder-membership="${folderId}"
-                      data-membership-item="${key}"
-                      ${itemFolderIds(key).includes(folderId) ? "checked" : ""}
-                    >
+                  <div class="folder-picker-row">
+                    <span class="folder-picker-badge">${item.icon}</span>
                     <span>${item.icon} - ${escapeHtml(item.name)}</span>
-                  </label>
+                    ${folderItemButton(key, included, "Add Defense", "Remove Defense")}
+                  </div>
                 `;
               }).join("")}
             </div>
@@ -1580,6 +1578,38 @@ function renderPlaybookLibrary() {
   });
   els.playbookLibrary.querySelectorAll("[data-delete-folder]").forEach(button => {
     button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
+  });
+  els.playbookLibrary.querySelectorAll("[data-toggle-folder-item]").forEach(button => {
+    button.addEventListener("click", () => {
+      const included = button.dataset.folderIncluded === "true";
+      setItemFolderMembership(
+        button.dataset.toggleFolderItem,
+        button.dataset.folderId,
+        !included
+      );
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlaybookLibrary();
+      showSaveSuccess(included ? "Removed from folder" : "Added to folder");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-toggle-formation-plays]").forEach(button => {
+    button.addEventListener("click", () => {
+      const included = button.dataset.folderIncluded === "true";
+      plays
+        .filter(play => play.formationId === button.dataset.toggleFormationPlays)
+        .forEach(play => {
+          setItemFolderMembership(
+            libraryItemKey("play", play.id),
+            button.dataset.folderId,
+            !included
+          );
+        });
+      lastSavedSignature = "";
+      persistPlaybook();
+      renderPlaybookLibrary();
+      showSaveSuccess(included ? "Formation plays removed from folder" : "Formation plays added to folder");
+    });
   });
   els.playbookLibrary.querySelectorAll("[data-folder-membership]").forEach(input => {
     input.addEventListener("click", event => {
