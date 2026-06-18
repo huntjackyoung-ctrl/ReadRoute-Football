@@ -1203,7 +1203,7 @@ function folderPlayPickerMarkup(folderId) {
       data-toggle-folder-item="${key}"
       data-folder-id="${folderId}"
       data-folder-included="${included ? "true" : "false"}"
-      style="display:inline-flex;align-items:center;justify-content:center;min-width:82px;padding:6px 8px;border:1px solid ${included ? "#e4b7aa" : "#cbd4bc"};border-radius:5px;color:${included ? "#8f2f1f" : "#174c35"};background:${included ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
+      style="display:inline-flex;align-items:center;justify-content:center;min-width:88px;padding:7px 10px;border:1px solid ${included ? "#e4b7aa" : "#cbd4bc"};border-radius:6px;color:${included ? "#8f2f1f" : "#174c35"};background:${included ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
     >${included ? removeLabel : addLabel}</button>
   `;
 
@@ -1218,30 +1218,30 @@ function folderPlayPickerMarkup(folderId) {
     ).length;
     const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
     return `
-      <table style="width:100%;margin:0 0 10px;border-collapse:separate;border-spacing:0;border:1px solid #dfe7cf;border-radius:6px;background:#fff;color:#0b1e16;table-layout:fixed;overflow:hidden;">
+      <table style="width:100%;min-width:430px;margin:0 0 14px;border-collapse:separate;border-spacing:0;border:1px solid #dfe7cf;border-radius:8px;background:#fff;color:#0b1e16;table-layout:fixed;overflow:hidden;">
         <tbody>
           <tr style="background:#f5f8ec;">
-            <td style="width:58px;padding:8px 6px;vertical-align:middle;">
+            <td style="width:62px;padding:12px 8px;vertical-align:middle;">
               <span style="display:inline-block;padding:4px 7px;border-radius:999px;color:#102016;background:#c9f45c;font-size:8px;font-weight:950;line-height:1;text-transform:uppercase;">Form</span>
             </td>
-            <td style="padding:8px 6px;vertical-align:middle;color:#0b1e16;font-size:11px;font-weight:950;line-height:1.25;white-space:normal;word-break:break-word;">
+            <td style="padding:12px 8px;vertical-align:middle;color:#0b1e16;font-size:12px;font-weight:950;line-height:1.35;white-space:normal;word-break:break-word;">
               ${escapeHtml(formation.name)}
             </td>
-            <td style="width:70px;padding:8px 6px;vertical-align:middle;color:#6f7767;font-size:9px;font-weight:850;text-align:right;white-space:nowrap;">${selectedCount}/${formationPlays.length}</td>
-            <td style="width:100px;padding:6px;vertical-align:middle;text-align:right;">${folderItemButton(formationKey, formationSelected, "Add Form", "Remove")}</td>
+            <td style="width:70px;padding:12px 8px;vertical-align:middle;color:#6f7767;font-size:9px;font-weight:850;text-align:right;white-space:nowrap;">${selectedCount}/${formationPlays.length}</td>
+            <td style="width:112px;padding:8px;vertical-align:middle;text-align:right;">${folderItemButton(formationKey, formationSelected, "Add Form", "Remove")}</td>
           </tr>
           ${formationPlays.length ? `
             <tr style="background:#f6faee;">
-              <td style="padding:7px 6px;"></td>
-              <td colspan="2" style="padding:7px 6px;color:#174c35;font-size:10px;font-weight:950;line-height:1.25;">All plays in ${escapeHtml(formation.name)}</td>
-              <td style="padding:6px;text-align:right;">
+              <td style="padding:10px 8px;"></td>
+              <td colspan="2" style="padding:10px 8px;color:#174c35;font-size:11px;font-weight:950;line-height:1.35;">All plays in ${escapeHtml(formation.name)}</td>
+              <td style="padding:8px;text-align:right;">
                 <button
                   type="button"
                   class="folder-picker-action ${allSelected ? "is-selected" : ""}"
                   data-toggle-formation-plays="${formation.id}"
                   data-folder-id="${folderId}"
                   data-folder-included="${allSelected ? "true" : "false"}"
-                  style="display:inline-flex;align-items:center;justify-content:center;min-width:82px;padding:6px 8px;border:1px solid ${allSelected ? "#e4b7aa" : "#cbd4bc"};border-radius:5px;color:${allSelected ? "#8f2f1f" : "#174c35"};background:${allSelected ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
+                  style="display:inline-flex;align-items:center;justify-content:center;min-width:88px;padding:7px 10px;border:1px solid ${allSelected ? "#e4b7aa" : "#cbd4bc"};border-radius:6px;color:${allSelected ? "#8f2f1f" : "#174c35"};background:${allSelected ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
                 >${allSelected ? "Remove All" : "Add All"}</button>
               </td>
             </tr>
@@ -1250,18 +1250,18 @@ function folderPlayPickerMarkup(folderId) {
               const included = itemFolderIds(key).includes(folderId);
               return `
                 <tr>
-                  <td style="width:58px;padding:7px 6px;border-top:1px solid #eef1e5;vertical-align:middle;">
+                  <td style="width:62px;padding:10px 8px;border-top:1px solid #eef1e5;vertical-align:middle;">
                     <span style="display:inline-block;padding:4px 7px;border-radius:999px;color:#102016;background:#c9f45c;font-size:8px;font-weight:950;line-height:1;text-transform:uppercase;">Play</span>
                   </td>
-                  <td colspan="2" style="padding:7px 6px;border-top:1px solid #eef1e5;color:#0b1e16;font-size:10px;font-weight:850;line-height:1.25;white-space:normal;word-break:break-word;">${escapeHtml(play.name)}</td>
-                  <td style="width:100px;padding:6px;border-top:1px solid #eef1e5;text-align:right;">${folderItemButton(key, included, "Add", "Remove")}</td>
+                  <td colspan="2" style="padding:10px 8px;border-top:1px solid #eef1e5;color:#0b1e16;font-size:11px;font-weight:850;line-height:1.35;white-space:normal;word-break:break-word;">${escapeHtml(play.name)}</td>
+                  <td style="width:112px;padding:8px;border-top:1px solid #eef1e5;text-align:right;">${folderItemButton(key, included, "Add", "Remove")}</td>
                 </tr>
               `;
             }).join("")}
           ` : `
             <tr>
-              <td style="padding:7px 6px;border-top:1px solid #eef1e5;"></td>
-              <td colspan="3" style="padding:7px 6px;border-top:1px solid #eef1e5;color:#6f7767;font-size:10px;font-style:italic;">No plays saved for this formation. You can still add the formation above.</td>
+              <td style="padding:10px 8px;border-top:1px solid #eef1e5;"></td>
+              <td colspan="3" style="padding:10px 8px;border-top:1px solid #eef1e5;color:#6f7767;font-size:10px;font-style:italic;">No plays saved for this formation. You can still add the formation above.</td>
             </tr>
           `}
         </tbody>

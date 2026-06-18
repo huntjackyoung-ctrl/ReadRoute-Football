@@ -685,11 +685,12 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   background: #fff;
 }
 .folder-picker-scroll {
-  max-height: 315px;
-  padding: 7px;
-  overflow-y: auto;
+  max-height: 520px;
+  padding: 10px;
+  overflow: auto;
   display: grid;
-  gap: 4px;
+  gap: 10px;
+  scrollbar-color: #bcc7a7 transparent;
 }
 .folder-membership-list label {
   min-height: 24px;
