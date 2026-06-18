@@ -4083,6 +4083,30 @@ function trenchProgress(progress, speed = 1) {
   return Math.max(0, Math.min(1, progress * (Number(speed) || 1)));
 }
 
+function trenchPathForPlayer(player, movement = {}, target = null) {
+  const path = Array.isArray(movement.path) ? movement.path : [];
+  if (path.length) return path;
+  return target ? [{ x: target.x, y: target.y, rounded: false }] : [];
+}
+
+function trenchTravelPoint(player, path, elapsedMs, speed = 1, engaged = false) {
+  if (!path.length) return { ...player, travelProgress: 1 };
+  const basePixelsPerSecond = 185;
+  const contactMultiplier = engaged ? 0.48 : 1;
+  const distance = Math.max(1, pathLength(player, path));
+  const traveled = (elapsedMs / 1000) * basePixelsPerSecond * (Number(speed) || 1) * contactMultiplier;
+  const progress = Math.max(0, Math.min(1, traveled / distance));
+  return { ...player, ...pointOnPath(player, path, progress), travelProgress: progress };
+}
+
+function movementVector(start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const length = Math.hypot(dx, dy);
+  if (length < 1) return null;
+  return { x: dx / length, y: dy / length };
+}
+
 function renderTrenches() {
   if (!els.trenchesBoard) return;
   els.trenchesPlayName.value = trenchesState.playName || "";
@@ -4437,61 +4461,58 @@ function finishTrenchesDrag(event) {
 
 function runTrenchesPlay() {
   const start = trenchesPositions(trenchesState.frontId);
-  const duration = 1600;
+  const duration = 3800;
   const startedAt = performance.now();
   cancelAnimationFrame(trenchesAnimationFrame);
   const tick = now => {
-    const progress = Math.min(1, (now - startedAt) / duration);
-    const ease = 1 - Math.pow(1 - progress, 3);
+    const elapsedMs = now - startedAt;
+    const progress = Math.min(1, elapsedMs / duration);
+    const offensePositions = start.offense.map(player => {
+      const assignment = trenchesState.assignments[player.id] || {};
+      const target = start.defense.find(defender => defender.id === assignment.targetId);
+      const path = trenchPathForPlayer(player, assignment, target);
+      const contactSoon = target && Math.hypot(player.x - target.x, player.y - target.y) < 75;
+      return trenchTravelPoint(player, path, elapsedMs, assignment.speed || 1, contactSoon && progress > .18);
+    });
+    const defenseBase = start.defense.map(player => {
+      const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
+      return trenchTravelPoint(player, movement.path || [], elapsedMs, movement.speed || 1, false);
+    });
+    const defensePositions = defenseBase.map(defender => ({ ...defender }));
+
+    offensePositions.forEach(blocker => {
+      const assignment = trenchesState.assignments[blocker.id] || {};
+      const targetIndex = defensePositions.findIndex(defender => defender.id === assignment.targetId);
+      if (targetIndex < 0) return;
+      const defender = defensePositions[targetIndex];
+      const startBlocker = start.offense.find(player => player.id === blocker.id) || blocker;
+      const moveUnit = movementVector(startBlocker, blocker)
+        || movementVector(startBlocker, defender)
+        || { x: 0, y: -1 };
+      const distance = Math.hypot(blocker.x - defender.x, blocker.y - defender.y);
+      if (distance > 58 && blocker.travelProgress < .98) return;
+
+      const separation = 42;
+      const pushAmount = Math.max(0, 1 - Math.min(distance, 58) / 58);
+      const desired = {
+        x: blocker.x + (moveUnit.x * separation),
+        y: blocker.y + (moveUnit.y * separation)
+      };
+      defender.x += (desired.x - defender.x) * Math.min(.55, .22 + pushAmount * .35);
+      defender.y += (desired.y - defender.y) * Math.min(.55, .22 + pushAmount * .35);
+      const nextDistance = Math.hypot(blocker.x - defender.x, blocker.y - defender.y) || 1;
+      if (nextDistance < 36) {
+        defender.x = blocker.x + (moveUnit.x * 36);
+        defender.y = blocker.y + (moveUnit.y * 36);
+      }
+      defender.x = Math.max(70, Math.min(830, defender.x));
+      defender.y = Math.max(70, Math.min(430, defender.y));
+    });
+
     trenchesAnimation = {
       positions: {
-        offense: start.offense.map(player => {
-          const assignment = trenchesState.assignments[player.id] || {};
-          const path = assignment.path || [];
-          const target = start.defense.find(defender => defender.id === assignment.targetId);
-          const effectivePath = path.length ? path : target ? [{ x: target.x, y: target.y, rounded: false }] : [];
-          const rawProgress = trenchProgress(ease, assignment.speed || 1);
-          const engaged = target && rawProgress > .55;
-          const slowedProgress = engaged ? .55 + ((rawProgress - .55) * .45) : rawProgress;
-          const point = pointOnPath(player, effectivePath, Math.min(1, slowedProgress));
-          return { ...player, ...point, engagedTargetId: engaged ? assignment.targetId : "" };
-        }),
-        defense: start.defense.map(player => {
-          const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
-          let driven = {
-            ...player,
-            ...pointOnPath(player, movement.path || [], trenchProgress(ease, movement.speed || 1))
-          };
-          let bestContact = null;
-          start.offense.forEach(lineman => {
-            const assignment = trenchesState.assignments[lineman.id] || {};
-            const path = assignment.path || [];
-            const rawProgress = trenchProgress(ease, assignment.speed || 1);
-            const targetLock = assignment.targetId === player.id;
-            const effectivePath = path.length ? path : targetLock ? [{ x: player.x, y: player.y, rounded: false }] : [];
-            const blocker = { ...lineman, ...pointOnPath(lineman, effectivePath, targetLock ? Math.min(1, .55 + ((rawProgress - .55) * .45)) : rawProgress) };
-            const distance = Math.hypot(blocker.x - driven.x, blocker.y - driven.y);
-            if (distance < 66 && effectivePath.length) {
-              const previous = pointOnPath(lineman, effectivePath, Math.max(0, rawProgress - .05));
-              const dx = blocker.x - previous.x;
-              const dy = blocker.y - previous.y || -1;
-              const length = Math.hypot(dx, dy) || 1;
-              const unit = { x: dx / length, y: dy / length };
-              const target = {
-                x: blocker.x + (unit.x * 44),
-                y: blocker.y + (unit.y * 44)
-              };
-              const score = (targetLock ? 100 : 70) - distance;
-              if (!bestContact || score > bestContact.score) bestContact = { target, score };
-            }
-          });
-          if (bestContact) {
-            driven.x += (bestContact.target.x - driven.x) * Math.min(.85, .25 + ease);
-            driven.y += (bestContact.target.y - driven.y) * Math.min(.85, .25 + ease);
-          }
-          driven.y = Math.max(70, Math.min(405, driven.y));
-          return driven;
-        })
+        offense: offensePositions,
+        defense: defensePositions
       }
     };
     renderTrenches();
