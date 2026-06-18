@@ -3937,7 +3937,7 @@ function updateTrenchesSelection(id, side = "offense") {
   trenchesState.selectedId = id;
   if (els.trenchesSelectedName) els.trenchesSelectedName.textContent = side === "defense" ? `DEF ${id}` : id;
   const selected = selectedTrenchesMovement();
-  if (els.trenchesSpeedSelect) els.trenchesSpeedSelect.value = String(selected.speed || 1);
+  if (els.trenchesSpeedSelect) els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(selected.speed);
   saveTrenchesState();
 }
 
@@ -3949,6 +3949,13 @@ function selectedTrenchesMovement() {
   }
   trenchesState.assignments[trenchesState.selectedId] ||= { path: [], targetId: "", speed: 1 };
   return trenchesState.assignments[trenchesState.selectedId];
+}
+
+function normalizedTrenchSpeedValue(speed) {
+  const value = Number(speed) || 1;
+  const choices = [1, 0.75, 0.5, 0.25, 0.1];
+  return String(choices.reduce((closest, choice) =>
+    Math.abs(choice - value) < Math.abs(closest - value) ? choice : closest, 1));
 }
 
 function deleteTrenchesOffensePlayer(playerId) {
@@ -4098,12 +4105,21 @@ function trenchPathForPlayer(player, movement = {}, target = null) {
 
 function trenchTravelPoint(player, path, elapsedMs, speed = 1, engaged = false) {
   if (!path.length) return { ...player, travelProgress: 1 };
-  const basePixelsPerSecond = 185;
-  const contactMultiplier = engaged ? 0.48 : 1;
+  const basePixelsPerSecond = 118;
+  const contactMultiplier = engaged ? 0.36 : 1;
   const distance = Math.max(1, pathLength(player, path));
-  const traveled = (elapsedMs / 1000) * basePixelsPerSecond * (Number(speed) || 1) * contactMultiplier;
+  const speedPercent = Math.max(0.1, Math.min(1, Number(speed) || 1));
+  const traveled = (elapsedMs / 1000) * basePixelsPerSecond * speedPercent * contactMultiplier;
   const progress = Math.max(0, Math.min(1, traveled / distance));
   return { ...player, ...pointOnPath(player, path, progress), travelProgress: progress };
+}
+
+function trenchMovementDurationMs(player, path, speed = 1, contact = false) {
+  if (!path.length) return 0;
+  const basePixelsPerSecond = 118;
+  const speedPercent = Math.max(0.1, Math.min(1, Number(speed) || 1));
+  const contactMultiplier = contact ? 0.36 : 1;
+  return (pathLength(player, path) / (basePixelsPerSecond * speedPercent * contactMultiplier)) * 1000;
 }
 
 function movementVector(start, end) {
@@ -4131,7 +4147,7 @@ function renderTrenches() {
     els.trenchesFrontName.value = front.name || "Starter Front";
   }
   els.trenchesSelectedName.textContent = trenchesState.selectedSide === "defense" ? `DEF ${trenchesState.selectedId}` : trenchesState.selectedId;
-  els.trenchesSpeedSelect.value = String(selectedTrenchesMovement().speed || 1);
+  els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(selectedTrenchesMovement().speed);
   els.trenchesMoveButton?.classList.toggle("active", trenchesState.mode !== "draw");
   els.trenchesDrawButton?.classList.toggle("active", trenchesState.mode === "draw");
   document.querySelectorAll("[data-trenches-panel-tab]").forEach(button => {
@@ -4474,7 +4490,17 @@ function finishTrenchesDrag(event) {
 
 function runTrenchesPlay() {
   const start = trenchesPositions(trenchesState.frontId);
-  const duration = 3800;
+  const offenseDurations = start.offense.map(player => {
+    const assignment = trenchesState.assignments[player.id] || {};
+    const target = start.defense.find(defender => defender.id === assignment.targetId);
+    const path = trenchPathForPlayer(player, assignment, target);
+    return trenchMovementDurationMs(player, path, assignment.speed || 1, Boolean(target));
+  });
+  const defenseDurations = start.defense.map(player => {
+    const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
+    return trenchMovementDurationMs(player, movement.path || [], movement.speed || 1, false);
+  });
+  const duration = Math.max(2500, Math.min(30000, ...offenseDurations, ...defenseDurations) + 450);
   const startedAt = performance.now();
   cancelAnimationFrame(trenchesAnimationFrame);
   const tick = now => {
