@@ -1198,10 +1198,12 @@ function customLibraryFileMarkup(item, folderId) {
 function folderPlayPickerMarkup(folderId) {
   const folderItemButton = (key, included, addLabel = "Add", removeLabel = "Remove") => `
     <button
+      type="button"
       class="folder-picker-action ${included ? "is-selected" : ""}"
       data-toggle-folder-item="${key}"
       data-folder-id="${folderId}"
       data-folder-included="${included ? "true" : "false"}"
+      style="display:inline-flex;align-items:center;justify-content:center;min-width:82px;padding:6px 8px;border:1px solid ${included ? "#e4b7aa" : "#cbd4bc"};border-radius:5px;color:${included ? "#8f2f1f" : "#174c35"};background:${included ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
     >${included ? removeLabel : addLabel}</button>
   `;
 
@@ -1216,33 +1218,35 @@ function folderPlayPickerMarkup(folderId) {
     ).length;
     const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
     return `
-      <div class="folder-formation-picker">
-        <div class="folder-formation-picker-header">
-          <div class="folder-formation-name-option">
-            <span class="folder-picker-badge">Formation</span>
-            <span>${escapeHtml(formation.name)}</span>
+      <div style="display:block;margin:0 0 8px;border:1px solid #dfe7cf;border-radius:6px;background:#ffffff;overflow:hidden;">
+        <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;gap:8px;align-items:center;min-height:34px;padding:8px;background:#f5f8ec;color:#0b1e16;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;border-radius:999px;color:#102016;background:#c9f45c;font-size:8px;font-weight:950;line-height:1;text-transform:uppercase;">Formation</span>
+          <div style="display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#0b1e16;font-size:11px;font-weight:950;line-height:1.25;">
+            ${escapeHtml(formation.name)}
           </div>
-          <small>${selectedCount}/${formationPlays.length} plays selected</small>
+          <small style="display:block;color:#6f7767;font-size:9px;font-weight:850;white-space:nowrap;">${selectedCount}/${formationPlays.length} plays</small>
           ${folderItemButton(formationKey, formationSelected, "Add Formation", "Remove Formation")}
         </div>
-        <div class="folder-formation-play-list">
+        <div style="display:grid;gap:0;padding:6px;background:#ffffff;">
           ${formationPlays.length ? `
-            <div class="folder-picker-row folder-all-plays-option">
-              <span>All plays in ${escapeHtml(formation.name)}</span>
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;min-height:32px;padding:7px;border-radius:5px;background:#f6faee;color:#0b1e16;">
+              <span style="display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#174c35;font-size:10px;font-weight:950;line-height:1.25;">All plays in ${escapeHtml(formation.name)}</span>
               <button
+                type="button"
                 class="folder-picker-action ${allSelected ? "is-selected" : ""}"
                 data-toggle-formation-plays="${formation.id}"
                 data-folder-id="${folderId}"
                 data-folder-included="${allSelected ? "true" : "false"}"
+                style="display:inline-flex;align-items:center;justify-content:center;min-width:96px;padding:6px 8px;border:1px solid ${allSelected ? "#e4b7aa" : "#cbd4bc"};border-radius:5px;color:${allSelected ? "#8f2f1f" : "#174c35"};background:${allSelected ? "#fff4ef" : "#ffffff"};font-size:9px;font-weight:900;line-height:1;white-space:nowrap;"
               >${allSelected ? "Remove All Plays" : "Add All Plays"}</button>
             </div>
             ${formationPlays.map(play => {
               const key = libraryItemKey("play", play.id);
               const included = itemFolderIds(key).includes(folderId);
               return `
-                <div class="folder-picker-row">
-                  <span class="folder-picker-badge">Play</span>
-                  <span>${escapeHtml(play.name)}</span>
+                <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;min-height:32px;padding:7px;border-top:1px solid #eef1e5;color:#0b1e16;background:#ffffff;">
+                  <span style="display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;border-radius:999px;color:#102016;background:#c9f45c;font-size:8px;font-weight:950;line-height:1;text-transform:uppercase;">Play</span>
+                  <span style="display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#0b1e16;font-size:10px;font-weight:850;line-height:1.25;">${escapeHtml(play.name)}</span>
                   ${folderItemButton(key, included, "Add Play", "Remove Play")}
                 </div>
               `;
@@ -1275,9 +1279,9 @@ function folderPlayPickerMarkup(folderId) {
                 const key = libraryItemKey(item.type, item.id);
                 const included = itemFolderIds(key).includes(folderId);
                 return `
-                  <div class="folder-picker-row">
-                    <span class="folder-picker-badge">${item.icon}</span>
-                    <span>${item.icon} - ${escapeHtml(item.name)}</span>
+                  <div style="display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:8px;align-items:center;min-height:32px;padding:7px;border-top:1px solid #eef1e5;color:#0b1e16;background:#ffffff;">
+                    <span style="display:inline-flex;align-items:center;justify-content:center;padding:4px 7px;border-radius:999px;color:#102016;background:#c9f45c;font-size:8px;font-weight:950;line-height:1;text-transform:uppercase;">${item.icon}</span>
+                    <span style="display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#0b1e16;font-size:10px;font-weight:850;line-height:1.25;">${item.icon} - ${escapeHtml(item.name)}</span>
                     ${folderItemButton(key, included, "Add Defense", "Remove Defense")}
                   </div>
                 `;
