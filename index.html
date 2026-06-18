@@ -82,7 +82,7 @@
             <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
             <p class="eyebrow trenches-selected-label">Selected player</p>
             <h3 id="trenchesSelectedName">LT</h3>
-            <label class="field-label" for="trenchesSpeedSelect">Speed</label>
+            <label class="field-label" for="trenchesSpeedSelect">Playback speed</label>
             <select id="trenchesSpeedSelect">
               <option value="1" selected>100%</option>
               <option value="0.75">75%</option>
@@ -107,6 +107,10 @@
             </div>
             <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
             <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
+            <div class="button-row">
+              <button id="undoTrenchesDefensePointButton" class="route-tool-button">Undo Movement</button>
+              <button id="clearTrenchesDefensePathButton" class="route-tool-button danger">Clear Movement</button>
+            </div>
             <div class="trenches-defender-editor">
               <p class="eyebrow">Front defenders</p>
               <div id="trenchesDefenderList"></div>
@@ -123,7 +127,7 @@
 
         <div class="trenches-board-card">
           <div id="trenchesBoard" class="trenches-board"></div>
-          <p class="field-note">Use Move to set alignments. Use Draw to select a blocker and click the field to draw his path. Click a path point to round that break.</p>
+          <p class="field-note">Use Move to set alignments. Use Draw to select an offensive player or defender, then click the field to draw that player’s movement. Click a path point to round that break.</p>
         </div>
       </div>
     </section>

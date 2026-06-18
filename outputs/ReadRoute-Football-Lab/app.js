@@ -366,6 +366,7 @@ function loadTrenchesState() {
   return {
     mode: saved.mode === "draw" ? "draw" : "move",
     panelTab: saved.panelTab === "defense" ? "defense" : "offense",
+    playbackSpeed: Number(savedPlay?.playbackSpeed || saved.playbackSpeed) || 1,
     playName: savedPlay?.name || saved.playName || "",
     selectedPlayId,
     plays,
@@ -3936,8 +3937,7 @@ function updateTrenchesSelection(id, side = "offense") {
   trenchesState.selectedSide = side;
   trenchesState.selectedId = id;
   if (els.trenchesSelectedName) els.trenchesSelectedName.textContent = side === "defense" ? `DEF ${id}` : id;
-  const selected = selectedTrenchesMovement();
-  if (els.trenchesSpeedSelect) els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(selected.speed);
+  if (els.trenchesSpeedSelect) els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(trenchesState.playbackSpeed);
   saveTrenchesState();
 }
 
@@ -3995,6 +3995,7 @@ function saveTrenchesPlayFromState(nameOverride = "") {
     id: trenchesState.selectedPlayId || crypto.randomUUID(),
     name,
     frontId: trenchesState.frontId,
+    playbackSpeed: trenchesState.playbackSpeed || 1,
     assignments: structuredClone(trenchesState.assignments),
     defensePaths: structuredClone(trenchesState.defensePaths || {}),
     fronts: structuredClone(trenchesState.fronts || {}),
@@ -4016,6 +4017,7 @@ function loadTrenchesPlay(playId) {
   trenchesState.selectedPlayId = play.id;
   trenchesState.playName = play.name;
   trenchesState.frontId = play.frontId || trenchesState.frontId;
+  trenchesState.playbackSpeed = Number(play.playbackSpeed) || 1;
   trenchesState.assignments = {
     ...defaultTrenchesAssignments(),
     ...(play.assignments || {})
@@ -4147,7 +4149,7 @@ function renderTrenches() {
     els.trenchesFrontName.value = front.name || "Starter Front";
   }
   els.trenchesSelectedName.textContent = trenchesState.selectedSide === "defense" ? `DEF ${trenchesState.selectedId}` : trenchesState.selectedId;
-  els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(selectedTrenchesMovement().speed);
+  els.trenchesSpeedSelect.value = normalizedTrenchSpeedValue(trenchesState.playbackSpeed);
   els.trenchesMoveButton?.classList.toggle("active", trenchesState.mode !== "draw");
   els.trenchesDrawButton?.classList.toggle("active", trenchesState.mode === "draw");
   document.querySelectorAll("[data-trenches-panel-tab]").forEach(button => {
@@ -4490,15 +4492,16 @@ function finishTrenchesDrag(event) {
 
 function runTrenchesPlay() {
   const start = trenchesPositions(trenchesState.frontId);
+  const playbackSpeed = Math.max(0.1, Math.min(1, Number(trenchesState.playbackSpeed) || 1));
   const offenseDurations = start.offense.map(player => {
     const assignment = trenchesState.assignments[player.id] || {};
     const target = start.defense.find(defender => defender.id === assignment.targetId);
     const path = trenchPathForPlayer(player, assignment, target);
-    return trenchMovementDurationMs(player, path, assignment.speed || 1, Boolean(target));
+    return trenchMovementDurationMs(player, path, playbackSpeed, Boolean(target));
   });
   const defenseDurations = start.defense.map(player => {
     const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
-    return trenchMovementDurationMs(player, movement.path || [], movement.speed || 1, false);
+    return trenchMovementDurationMs(player, movement.path || [], playbackSpeed, false);
   });
   const duration = Math.max(2500, Math.min(30000, ...offenseDurations, ...defenseDurations) + 450);
   const startedAt = performance.now();
@@ -4511,11 +4514,11 @@ function runTrenchesPlay() {
       const target = start.defense.find(defender => defender.id === assignment.targetId);
       const path = trenchPathForPlayer(player, assignment, target);
       const contactSoon = target && Math.hypot(player.x - target.x, player.y - target.y) < 75;
-      return trenchTravelPoint(player, path, elapsedMs, assignment.speed || 1, contactSoon && progress > .18);
+      return trenchTravelPoint(player, path, elapsedMs, playbackSpeed, contactSoon && progress > .18);
     });
     const defenseBase = start.defense.map(player => {
       const movement = trenchesState.defensePaths?.[player.id] || { path: [], speed: 1 };
-      return trenchTravelPoint(player, movement.path || [], elapsedMs, movement.speed || 1, false);
+      return trenchTravelPoint(player, movement.path || [], elapsedMs, playbackSpeed, false);
     });
     const defensePositions = defenseBase.map(defender => ({ ...defender }));
 
@@ -6530,7 +6533,7 @@ document.querySelectorAll("[data-trenches-panel-tab]").forEach(button => {
 });
 
 els.trenchesSpeedSelect?.addEventListener("change", () => {
-  selectedTrenchesMovement().speed = Number(els.trenchesSpeedSelect.value) || 1;
+  trenchesState.playbackSpeed = Number(els.trenchesSpeedSelect.value) || 1;
   saveTrenchesState();
   renderTrenches();
 });

@@ -503,7 +503,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .trenches-defender-row {
   display: grid;
-  grid-template-columns: 1fr auto auto;
+  grid-template-columns: 1fr auto auto auto;
   gap: 8px;
   align-items: center;
   margin-bottom: 7px;
@@ -520,6 +520,12 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   padding: 0 9px;
   background: #fff;
   font-weight: 900;
+}
+.trenches-path-count {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 .library-heading {
   margin-bottom: 26px;
