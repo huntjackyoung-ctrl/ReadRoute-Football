@@ -17,6 +17,24 @@ const offensiveLine = [
 const quarterback = { id: "QB", label: "QB", x: 450, y: 540 };
 const routeableOffense = [...skillPositions, quarterback];
 const defensePositionLabels = ["DE", "DT", "DT", "DE", "OLB", "MLB", "OLB", "CB", "FS", "SS", "CB"];
+const offensePositionColors = {
+  X: "#ffcc4d",
+  H: "#55c7ff",
+  Y: "#b892ff",
+  Z: "#ff7b92",
+  RB: "#64d96b",
+  QB: "#f8f4e8",
+  LT: "#f5a24b",
+  LG: "#f7b85c",
+  C: "#ffd166",
+  RG: "#f7b85c",
+  RT: "#f5a24b"
+};
+const defensePositionColors = [
+  "#ff6b4a", "#ff8c42", "#f4a62a", "#ff6b4a",
+  "#4cc9f0", "#4895ef", "#4cc9f0",
+  "#9d4edd", "#5a7dff", "#7b61ff", "#9d4edd"
+];
 const lineOfScrimmage = 476;
 const fieldWidth = 900;
 const fieldHeight = 700;
@@ -1026,6 +1044,39 @@ function svgEl(name, attrs = {}) {
   const element = document.createElementNS("http://www.w3.org/2000/svg", name);
   Object.entries(attrs).forEach(([key, value]) => element.setAttribute(key, value));
   return element;
+}
+
+function positionColor(id, side = "offense") {
+  if (side === "defense") {
+    const index = Number(String(id).replace(/\D/g, ""));
+    return defensePositionColors[Number.isFinite(index) ? index % defensePositionColors.length : 0];
+  }
+  return offensePositionColors[id] || "#f2c35a";
+}
+
+function hexToRgb(hex) {
+  const clean = String(hex || "").replace("#", "");
+  const value = clean.length === 3
+    ? clean.split("").map(char => char + char).join("")
+    : clean;
+  const number = Number.parseInt(value, 16);
+  if (!Number.isFinite(number)) return { r: 242, g: 195, b: 90 };
+  return {
+    r: (number >> 16) & 255,
+    g: (number >> 8) & 255,
+    b: number & 255
+  };
+}
+
+function rgba(hex, alpha) {
+  const color = hexToRgb(hex);
+  return `rgba(${color.r},${color.g},${color.b},${alpha})`;
+}
+
+function readableTextColor(hex) {
+  const { r, g, b } = hexToRgb(hex);
+  const luminance = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+  return luminance > 145 ? "#10231c" : "#fffdf7";
 }
 
 function zoneRadii(zone) {
@@ -2298,6 +2349,7 @@ function libraryPreviewMarkup() {
     ? formation.labels
     : item.labels || formation.labels;
   const routeMarkup = isDefense ? "" : skillPositions.map(position => {
+    const playerColor = positionColor(position.id, "offense");
     const route = item.routes[position.id] || [];
     const motion = item.motions?.[position.id] || [];
     const start = offensePositions[position.id];
@@ -2308,10 +2360,10 @@ function libraryPreviewMarkup() {
       ? route.map(point => ({ ...point, x: point.x + dx, y: point.y + dy }))
       : route;
     const motionPath = motion.length
-      ? `<path d="${motion.length === 1 ? `M ${start.x} ${start.y} L ${motion[0].x} ${motion[0].y}` : routePathData(start, motion)}" fill="none" stroke="#76d7ff" stroke-width="4" stroke-dasharray="7 6" marker-end="url(#libraryMotionArrow)"></path>`
+      ? `<path d="${motion.length === 1 ? `M ${start.x} ${start.y} L ${motion[0].x} ${motion[0].y}` : routePathData(start, motion)}" fill="none" stroke="${playerColor}" stroke-width="4" stroke-dasharray="7 6" marker-end="url(#libraryMotionArrow)"></path>`
       : "";
     const routePath = shiftedRoute.length
-      ? `<path d="${shiftedRoute.length === 1 ? `M ${snapStart.x} ${snapStart.y} L ${shiftedRoute[0].x} ${shiftedRoute[0].y}` : routePathData(snapStart, shiftedRoute)}" fill="none" stroke="#f2c35a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`
+      ? `<path d="${shiftedRoute.length === 1 ? `M ${snapStart.x} ${snapStart.y} L ${shiftedRoute[0].x} ${shiftedRoute[0].y}` : routePathData(snapStart, shiftedRoute)}" fill="none" stroke="${playerColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`
       : "";
     return motionPath + routePath;
   }).join("");
@@ -2319,14 +2371,16 @@ function libraryPreviewMarkup() {
     ? ""
     : (() => {
         const start = offensePositions.QB;
+        const playerColor = positionColor("QB", "offense");
         const route = item.routes.QB || [];
         if (!route.length) return "";
         const pathData = route.length === 1
           ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}`
           : routePathData(start, route);
-        return `<path d="${pathData}" fill="none" stroke="#f2c35a" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`;
+        return `<path d="${pathData}" fill="none" stroke="${playerColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`;
       })();
   const optionRouteMarkup = isDefense ? "" : skillPositions.map(position => {
+    const playerColor = positionColor(position.id, "offense");
     const start = offensePositions[position.id];
     const motion = item.motions?.[position.id] || [];
     const snapStart = motionEnd(start, motion);
@@ -2349,41 +2403,45 @@ function libraryPreviewMarkup() {
       const pathData = shifted.length === 1
         ? `M ${displayAnchor.x} ${displayAnchor.y} L ${shifted[0].x} ${shifted[0].y}`
         : routePathData(displayAnchor, shifted);
-      return `<path d="${pathData}" fill="none" stroke="#c9f45c" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#libraryOptionArrow)" opacity=".82"></path>`;
+      return `<path d="${pathData}" fill="none" stroke="${playerColor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#libraryOptionArrow)" opacity=".82"></path>`;
     }).join("");
   }).join("");
   const offenseMarkup = [
     ...skillPositions.map(position => {
       const point = offensePositions[position.id];
-      return `<g transform="translate(${point.x} ${point.y})"><circle r="18" fill="#f2c35a" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="#10231c" font-size="10" font-weight="900">${escapeHtml(offenseLabels[position.id] || position.id)}</text></g>`;
+      const playerColor = positionColor(position.id, "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><circle r="18" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="10" font-weight="900">${escapeHtml(offenseLabels[position.id] || position.id)}</text></g>`;
     }),
     ...offensiveLine.map(player => {
       const point = offensePositions[player.id];
-      return `<g transform="translate(${point.x} ${point.y})"><rect x="-15" y="-15" width="30" height="30" rx="5" fill="#f2c35a" stroke="#fff5d7" stroke-width="3"></rect><text y="4" text-anchor="middle" fill="#10231c" font-size="9" font-weight="900">${player.label}</text></g>`;
+      const playerColor = positionColor(player.id, "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><rect x="-15" y="-15" width="30" height="30" rx="5" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></rect><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="9" font-weight="900">${player.label}</text></g>`;
     }),
     (() => {
       const point = offensePositions.QB;
-      return `<g transform="translate(${point.x} ${point.y})"><circle r="19" fill="#f2c35a" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="#10231c" font-size="10" font-weight="900">QB</text></g>`;
+      const playerColor = positionColor("QB", "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><circle r="19" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="10" font-weight="900">QB</text></g>`;
     })()
   ].join("");
   const defenseMarkup = isDefense ? Object.keys(defaultDefensePositions()).map((id, index) => {
+    const defenderColor = positionColor(id, "defense");
     const start = item.positions[id] || defaultDefensePositions()[id];
     const route = item.routes[id] || [];
     const manTarget = item.manAssignments?.[id];
     const zoneAssignment = item.zoneAssignments?.[id];
     const manLine = manTarget && offensePositions[manTarget]
-      ? `<line x1="${start.x}" y1="${start.y}" x2="${offensePositions[manTarget].x}" y2="${offensePositions[manTarget].y}" stroke="#c9f45c" stroke-width="2" stroke-dasharray="5 5" opacity=".7"></line>`
+      ? `<line x1="${start.x}" y1="${start.y}" x2="${offensePositions[manTarget].x}" y2="${offensePositions[manTarget].y}" stroke="${defenderColor}" stroke-width="2" stroke-dasharray="5 5" opacity=".7"></line>`
       : "";
     const zoneMarkup = zoneAssignment
       ? (() => {
           const radii = zoneRadii(zoneAssignment);
-          return `<ellipse cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" rx="${radii.x}" ry="${radii.y}" fill="rgba(118,215,255,.08)" stroke="#76d7ff" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></ellipse>`;
+          return `<ellipse cx="${zoneAssignment.x}" cy="${zoneAssignment.y}" rx="${radii.x}" ry="${radii.y}" fill="${rgba(defenderColor, .1)}" stroke="${defenderColor}" stroke-width="2" stroke-dasharray="8 7" opacity=".55"></ellipse>`;
         })()
       : "";
     const path = route.length
-      ? `<path d="${route.length === 1 ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}` : routePathData(start, route)}" fill="none" stroke="#ed7048" stroke-width="4" stroke-dasharray="10 6" marker-end="url(#libraryDefenseArrow)"></path>`
+      ? `<path d="${route.length === 1 ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}` : routePathData(start, route)}" fill="none" stroke="${defenderColor}" stroke-width="4" stroke-dasharray="10 6" marker-end="url(#libraryDefenseArrow)"></path>`
       : "";
-    return `${zoneMarkup}${manLine}${path}<g transform="translate(${start.x} ${start.y})"><circle r="15" fill="#ed7048" stroke="#ffd8ca" stroke-width="2"></circle><text y="4" text-anchor="middle" fill="#30140c" font-size="8" font-weight="900">${escapeHtml(item.labels[id] || String(index + 1))}</text></g>`;
+    return `${zoneMarkup}${manLine}${path}<g transform="translate(${start.x} ${start.y})"><circle r="15" fill="${defenderColor}" stroke="#ffd8ca" stroke-width="2"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(defenderColor)}" font-size="8" font-weight="900">${escapeHtml(item.labels[id] || String(index + 1))}</text></g>`;
   }).join("") : "";
   const notes = isDefense
     ? (item.notes || [])
@@ -2421,10 +2479,10 @@ function libraryPreviewMarkup() {
     <div class="library-field-frame">
     <svg viewBox="0 0 ${fieldWidth} ${fieldHeight}" aria-label="${escapeHtml(item.name)} preview">
       <defs>
-        <marker id="libraryArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#f2c35a"></path></marker>
-        <marker id="libraryMotionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#76d7ff"></path></marker>
-        <marker id="libraryDefenseArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#ed7048"></path></marker>
-        <marker id="libraryOptionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="#c9f45c"></path></marker>
+        <marker id="libraryArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+        <marker id="libraryMotionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+        <marker id="libraryDefenseArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+        <marker id="libraryOptionArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
       </defs>
       <rect width="${fieldWidth}" height="${fieldHeight}" rx="10" fill="#174c35"></rect>
       ${libraryFieldMarkingsMarkup()}
@@ -3133,6 +3191,8 @@ function renderRoutesAndPlayers() {
   const showOffensiveRoutes = isRunLikeMode()
     || (appTab === "create" && createScreen === "play");
   skillPositions.forEach(position => {
+    const playerColor = positionColor(position.id, "offense");
+    const playerTextColor = readableTextColor(playerColor);
     const basePlayerPosition = editorOffensePositions()[position.id];
     const playerPosition = offensePosition(position.id);
     const motion = showOffensiveRoutes ? currentMotion(position.id) : [];
@@ -3165,7 +3225,7 @@ function renderRoutesAndPlayers() {
     );
     appendRoutePath(els.routes, basePlayerPosition, motion, {
       fill: "none",
-      stroke: "#76d7ff",
+      stroke: playerColor,
       "stroke-width": activeRouteSide === "offense" && position.id === activeRouteId && playPathType === "motion" ? 6 : 4,
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
@@ -3191,7 +3251,7 @@ function renderRoutesAndPlayers() {
       }));
       appendRoutePath(els.routes, snapPosition, displayedStem, {
         fill: "none",
-        stroke: "#f2c35a",
+        stroke: playerColor,
         "stroke-width": 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
@@ -3200,7 +3260,7 @@ function renderRoutesAndPlayers() {
       });
       appendRoutePath(els.routes, displayedAnchor, displayedBranch, {
         fill: "none",
-        stroke: "#c9f45c",
+        stroke: playerColor,
         "stroke-width": 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
@@ -3212,7 +3272,7 @@ function renderRoutesAndPlayers() {
     } else {
       appendRoutePath(els.routes, snapPosition, route, {
         fill: "none",
-        stroke: "#f2c35a",
+        stroke: playerColor,
         "stroke-width": activeRouteSide === "offense" && position.id === activeRouteId && playPathType === "route" ? 8 : 6,
         "stroke-linecap": "round",
         "stroke-linejoin": "round",
@@ -3238,7 +3298,7 @@ function renderRoutesAndPlayers() {
         const selected = isSelectedOption && option.id === selectedRouteOptionId;
         appendRoutePath(els.routes, displayAnchor, displayPoints, {
           fill: "none",
-          stroke: "#c9f45c",
+          stroke: playerColor,
           "stroke-width": selected ? 7 : 5,
           "stroke-linecap": "round",
           "stroke-linejoin": "round",
@@ -3252,8 +3312,8 @@ function renderRoutesAndPlayers() {
           cx: displayAnchor.x,
           cy: displayAnchor.y,
           r: selected ? 7 : 5,
-          fill: selected ? "#c9f45c" : "#10231c",
-          stroke: "#c9f45c",
+          fill: selected ? playerColor : "#10231c",
+          stroke: playerColor,
           "stroke-width": 3,
           opacity: selected ? 1 : .75
         }));
@@ -3320,11 +3380,11 @@ function renderRoutesAndPlayers() {
     });
     group.append(svgEl("circle", {
       r: 18,
-      fill: isSelected ? "#c9f45c" : "#f2c35a",
+      fill: playerColor,
       stroke: isSelected ? "#f4ffd0" : "#fff5d7",
       "stroke-width": 3
     }));
-    const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: "#10231c", "font-size": 10, "font-weight": 950 });
+    const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: playerTextColor, "font-size": 10, "font-weight": 950 });
     text.textContent = offenseLabel(position.id);
     group.append(text);
     els.players.append(group);
@@ -3362,10 +3422,10 @@ function renderRoutesAndPlayers() {
           r: canRound ? 9 : 7,
           fill: canRound && point.rounded ? "#c9f45c" : "#fffdf7",
           stroke: editingMotion
-            ? "#76d7ff"
+            ? playerColor
             : selectedRouteOptionId !== "base"
-              ? "#7da829"
-              : (canRound ? "#10231c" : "#f2c35a"),
+              ? playerColor
+              : (canRound ? "#10231c" : playerColor),
           "stroke-width": 3
         }));
         if (editingCreatePath && !editingMotion && canRound) {
@@ -3390,12 +3450,14 @@ function renderRoutesAndPlayers() {
   });
 
   offensiveLine.forEach(lineman => {
+    const playerColor = positionColor(lineman.id, "offense");
+    const playerTextColor = readableTextColor(playerColor);
     const basePlayerPosition = editorOffensePositions()[lineman.id];
     const playerPosition = offensePosition(lineman.id);
     const route = isRunLikeMode() ? routeForFormation(lineman.id) : [];
     appendRoutePath(els.routes, basePlayerPosition, route, {
       fill: "none",
-      stroke: "#f2c35a",
+      stroke: playerColor,
       "stroke-width": activeRouteSide === "offense" && lineman.id === activeRouteId ? 7 : 5,
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
@@ -3416,22 +3478,24 @@ function renderRoutesAndPlayers() {
       width: 30,
       height: 30,
       rx: 5,
-      fill: isSelected ? "#c9f45c" : "#f2c35a",
+      fill: playerColor,
       stroke: isSelected ? "#f4ffd0" : "#fff5d7",
       "stroke-width": 3
     }));
-    const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: "#10231c", "font-size": 9, "font-weight": 950 });
+    const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: playerTextColor, "font-size": 9, "font-weight": 950 });
     text.textContent = lineman.label;
     group.append(text);
     els.players.append(group);
   });
 
   const qbStart = editorOffensePositions().QB;
+  const qbColor = positionColor("QB", "offense");
+  const qbTextColor = readableTextColor(qbColor);
   const qbPosition = offensePosition("QB");
   const qbRoute = showOffensiveRoutes ? routeForFormation("QB") : [];
   appendRoutePath(els.routes, qbStart, qbRoute, {
     fill: "none",
-    stroke: "#f2c35a",
+    stroke: qbColor,
     "stroke-width": activeRouteSide === "offense" && activeRouteId === "QB" ? 7 : 5,
     "stroke-linecap": "round",
     "stroke-linejoin": "round",
@@ -3459,11 +3523,11 @@ function renderRoutesAndPlayers() {
   });
   qb.append(svgEl("circle", {
     r: 19,
-    fill: qbSelected ? "#c9f45c" : "#f2c35a",
+    fill: qbColor,
     stroke: qbSelected ? "#f4ffd0" : "#fff5d7",
     "stroke-width": 3
   }));
-  const qbText = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: "#10231c", "font-size": 10, "font-weight": 950 });
+  const qbText = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: qbTextColor, "font-size": 10, "font-weight": 950 });
   qbText.textContent = "QB";
   qb.append(qbText);
   els.players.append(qb);
@@ -3482,7 +3546,7 @@ function renderRoutesAndPlayers() {
       handle.append(svgEl("circle", {
         r: canRound ? 9 : 7,
         fill: canRound && point.rounded ? "#c9f45c" : "#fffdf7",
-        stroke: canRound ? "#10231c" : "#f2c35a",
+        stroke: canRound ? "#10231c" : qbColor,
         "stroke-width": 3
       }));
       if (editingCreateQbPath && canRound) appendSegmentSpeedControl(handle, point);
@@ -3510,6 +3574,8 @@ let defenderStarts = {};
 function defender(x, y, label = "") {
   const id = `D${defenderRenderIndex}`;
   defenderRenderIndex += 1;
+  const defenderColor = positionColor(id, "defense");
+  const defenderTextColor = readableTextColor(defenderColor);
   currentDefense().labels ||= {};
   const savedLabel = currentDefense().labels[id];
   const displayLabel = appTab === "test" && /^(?:D)?\d+$/i.test(savedLabel || "")
@@ -3535,8 +3601,8 @@ function defender(x, y, label = "") {
       cy: zoneAssignment.y,
       rx: radii.x,
       ry: radii.y,
-      fill: "rgba(118,215,255,.08)",
-      stroke: "#76d7ff",
+      fill: rgba(defenderColor, .1),
+      stroke: defenderColor,
       "stroke-width": selectedZone ? 3 : 2,
       "stroke-dasharray": "8 7",
       opacity: selectedZone ? .78 : .42
@@ -3567,7 +3633,7 @@ function defender(x, y, label = "") {
       y1: playerPosition.y,
       x2: zoneAssignment.x,
       y2: zoneAssignment.y,
-      stroke: "#76d7ff",
+      stroke: defenderColor,
       "stroke-width": 2,
       "stroke-dasharray": "4 6",
       opacity: selectedZone ? .75 : .3
@@ -3608,7 +3674,7 @@ function defender(x, y, label = "") {
       y1: playerPosition.y,
       x2: targetPoint.x,
       y2: targetPoint.y,
-      stroke: "#c9f45c",
+      stroke: defenderColor,
       "stroke-width": activeRouteSide === "defense" && activeRouteId === id ? 3 : 2,
       "stroke-dasharray": "5 5",
       opacity: activeRouteSide === "defense" && activeRouteId === id ? .95 : .48
@@ -3617,7 +3683,7 @@ function defender(x, y, label = "") {
   if (route.length && showTestAnswers) {
     appendRoutePath(els.routes, saved || { x, y }, route, {
       fill: "none",
-      stroke: "#ed7048",
+      stroke: defenderColor,
       "stroke-width": activeRouteSide === "defense" && activeRouteId === id ? 7 : 4,
       "stroke-linecap": "round",
       "stroke-linejoin": "round",
@@ -3649,11 +3715,11 @@ function defender(x, y, label = "") {
   });
   group.append(svgEl("circle", {
     r: 15,
-    fill: isSelected ? "#c9f45c" : "#ed7048",
+    fill: defenderColor,
     stroke: isSelected ? "#f4ffd0" : "#ffd8ca",
     "stroke-width": 2
   }));
-  const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: "#30140c", "font-size": 8, "font-weight": 950 });
+  const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: defenderTextColor, "font-size": 8, "font-weight": 950 });
   text.textContent = displayLabel;
   group.append(text);
   els.defenders.append(group);
@@ -3697,7 +3763,7 @@ function defender(x, y, label = "") {
       handle.append(svgEl("circle", {
         r: canRound ? 9 : 7,
         fill: canRound && point.rounded ? "#c9f45c" : "#fffdf7",
-        stroke: "#ed7048",
+        stroke: defenderColor,
         "stroke-width": 3
       }));
       handle.addEventListener("pointerdown", event => beginPathPointDrag(
@@ -5064,7 +5130,7 @@ function beginPathPointDrag(
 function updateDrawingGuide(event) {
   els.routes.querySelector(".drawing-guide")?.remove();
   let anchor = null;
-  let color = "#f2c35a";
+  let color = positionColor(activeRouteId, activeRouteSide);
   let dashed = false;
 
   if (appTab === "create" && boardMode === "draw") {
@@ -5074,7 +5140,6 @@ function updateDrawingGuide(event) {
       const motion = currentMotion(activeRouteId);
       if (playPathType === "motion" && activeRouteId !== "QB") {
         anchor = motion[motion.length - 1] || start;
-        color = "#76d7ff";
         dashed = true;
       } else {
         const option = selectedRouteOption(activeRouteId);
@@ -5087,7 +5152,6 @@ function updateDrawingGuide(event) {
               x: storedAnchor.x + (snapStart.x - start.x),
               y: storedAnchor.y + (snapStart.y - start.y)
             };
-            color = "#c9f45c";
             dashed = true;
           }
         } else {
@@ -5099,7 +5163,6 @@ function updateDrawingGuide(event) {
       && defenseAssignmentMode === "path") {
       const route = currentDefense().routes[activeRouteId] || [];
       anchor = route[route.length - 1] || currentDefenseEditorPositions()[activeRouteId];
-      color = "#ed7048";
       dashed = true;
     }
   } else if (appTab === "run" && scenarioEditing && scenarioTool === "draw") {
@@ -5110,7 +5173,6 @@ function updateDrawingGuide(event) {
       anchor = displayedRoute[displayedRoute.length - 1] || motionEnd(start, currentMotion(activeRouteId));
     } else {
       anchor = route[route.length - 1] || runScenario.defensePositions[activeRouteId];
-      color = "#ed7048";
       dashed = true;
     }
   }
