@@ -178,6 +178,7 @@ let testSessionIndex = -1;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let playbookTab = "all";
+let playbookSearchQuery = "";
 let activeFolderPickerId = null;
 let trenchesState = loadTrenchesState();
 let trenchesDrag = null;
@@ -1277,6 +1278,34 @@ function libraryItems() {
   ];
 }
 
+function playFormationName(play) {
+  return formations.find(formation => formation.id === play.formationId)?.name || "No Formation";
+}
+
+function normalizedPlaybookSearch() {
+  return playbookSearchQuery.trim().toLowerCase();
+}
+
+function playMatchesPlaybookSearch(play) {
+  const query = normalizedPlaybookSearch();
+  if (!query) return true;
+  return `${play.name} ${playFormationName(play)}`.toLowerCase().includes(query);
+}
+
+function playLibraryRowMarkup(play) {
+  const formationName = playFormationName(play);
+  return `
+    <div class="library-file-row">
+      <button class="library-file ${libraryPreview.type === "play" && libraryPreview.id === play.id ? "active" : ""}" data-library-play="${play.id}">
+        <span class="library-file-icon">P</span>
+        <span>${escapeHtml(formationName)} / ${escapeHtml(play.name)}</span>
+      </button>
+      <button class="library-action-button" data-edit-play="${play.id}">Edit</button>
+      <button class="library-action-button danger" data-delete-play="${play.id}" ${plays.length === 1 ? "disabled" : ""}>Delete</button>
+    </div>
+  `;
+}
+
 function itemFolderIds(key) {
   const saved = libraryAssignments[key];
   return Array.isArray(saved) ? saved : saved ? [saved] : [];
@@ -1584,6 +1613,30 @@ function allFilesBrowserMarkup() {
   `;
 }
 
+function playbookSearchResultsMarkup() {
+  const query = normalizedPlaybookSearch();
+  const matchingPlays = plays
+    .filter(playMatchesPlaybookSearch)
+    .sort((a, b) => {
+      const formationCompare = playFormationName(a).localeCompare(playFormationName(b));
+      return formationCompare || a.name.localeCompare(b.name);
+    });
+  return `
+    <section class="all-files-browser search-results-browser">
+      <div class="custom-folder-heading">
+        <div>
+          <p class="eyebrow">Search results</p>
+          <h3>${matchingPlays.length} ${matchingPlays.length === 1 ? "Play" : "Plays"} Found</h3>
+          <p class="custom-folder-help">Showing saved plays that match "${escapeHtml(query)}" by play name or formation.</p>
+        </div>
+      </div>
+      ${matchingPlays.length
+        ? matchingPlays.map(playLibraryRowMarkup).join("")
+        : `<p class="library-empty">No plays match that search yet.</p>`}
+    </section>
+  `;
+}
+
 function selectLibraryPreview(type, id) {
   const pageScroll = {
     x: window.scrollX,
@@ -1658,14 +1711,48 @@ function renderPlaybookLibrary() {
         aria-selected="${playbookTab === "folders" ? "true" : "false"}"
       >My Folders</button>
     </div>
+    <div class="playbook-search">
+      <label for="playbookSearchInput">Search plays</label>
+      <div class="playbook-search-row">
+        <input
+          id="playbookSearchInput"
+          type="search"
+          placeholder="Search by play or formation..."
+          value="${escapeHtml(playbookSearchQuery)}"
+          autocomplete="off"
+        >
+        <button class="library-action-button" data-clear-playbook-search ${playbookSearchQuery ? "" : "disabled"}>Clear</button>
+      </div>
+    </div>
     ${folderPickerPanelMarkup()}
     <div class="library-browser">
       <div class="library-files">
-        ${playbookTab === "all" ? allFilesBrowserMarkup() : customFolderBrowserMarkup()}
+        ${normalizedPlaybookSearch()
+          ? playbookSearchResultsMarkup()
+          : playbookTab === "all"
+            ? allFilesBrowserMarkup()
+            : customFolderBrowserMarkup()}
       </div>
       <div class="library-preview">${libraryPreviewMarkup()}</div>
     </div>
   `;
+
+  const searchInput = els.playbookLibrary.querySelector("#playbookSearchInput");
+  searchInput?.addEventListener("input", () => {
+    playbookSearchQuery = searchInput.value;
+    renderPlaybookLibrary();
+    requestAnimationFrame(() => {
+      const updatedInput = els.playbookLibrary.querySelector("#playbookSearchInput");
+      if (!updatedInput) return;
+      updatedInput.focus();
+      updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
+    });
+  });
+  els.playbookLibrary.querySelector("[data-clear-playbook-search]")
+    ?.addEventListener("click", () => {
+      playbookSearchQuery = "";
+      renderPlaybookLibrary();
+    });
 
   els.playbookLibrary.querySelectorAll("[data-playbook-section]").forEach(button => {
     button.addEventListener("click", () => {

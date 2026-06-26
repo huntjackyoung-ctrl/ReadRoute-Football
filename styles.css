@@ -625,6 +625,45 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   background: var(--lime);
   box-shadow: 0 6px 14px rgba(23,76,53,.14);
 }
+.playbook-search {
+  max-width: 640px;
+  margin: -8px 0 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #faf8f2;
+}
+.playbook-search label {
+  display: block;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: .12em;
+  text-transform: uppercase;
+}
+.playbook-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.playbook-search input {
+  width: 100%;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font: 800 14px Inter, sans-serif;
+}
+.search-results-browser .library-file-row {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+.search-results-browser .library-file-row + .library-file-row {
+  margin-top: 8px;
+}
 .library-files {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
