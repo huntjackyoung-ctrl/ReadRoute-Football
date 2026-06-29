@@ -575,16 +575,24 @@ function loadDraftPlay() {
   return recovered ? normalizePlay(recovered) : null;
 }
 
+function normalizeLibraryFolders(folders) {
+  return Array.isArray(folders)
+    ? folders.filter(folder => folder?.id && folder?.name).map((folder, index) => ({
+        id: folder.id,
+        name: String(folder.name),
+        parentId: folder.parentId || null,
+        order: Number.isFinite(Number(folder.order)) ? Number(folder.order) : index,
+        itemOrder: Array.isArray(folder.itemOrder)
+          ? [...new Set(folder.itemOrder.filter(Boolean))]
+          : []
+      }))
+    : [];
+}
+
 function loadLibraryFolders() {
   const saved = readJsonStorage(storageKeys.folders);
   const recovered = Array.isArray(saved) ? saved : recoverySnapshot()?.libraryFolders;
-  return Array.isArray(recovered)
-    ? recovered.filter(folder => folder?.id && folder?.name).map(folder => ({
-        id: folder.id,
-        name: String(folder.name),
-        parentId: folder.parentId || null
-      }))
-    : [];
+  return normalizeLibraryFolders(recovered);
 }
 
 function normalizeLibraryAssignments(assignments) {
@@ -1364,12 +1372,58 @@ function itemFolderIds(key) {
   return Array.isArray(saved) ? saved : saved ? [saved] : [];
 }
 
+function libraryFolderChildren(parentId) {
+  return libraryFolders
+    .filter(folder => (folder.parentId || null) === (parentId || null))
+    .sort((a, b) => {
+      const orderCompare = (Number(a.order) || 0) - (Number(b.order) || 0);
+      return orderCompare || a.name.localeCompare(b.name);
+    });
+}
+
+function sortLibraryFolderList(folders) {
+  return [...folders].sort((a, b) => {
+    const orderCompare = (Number(a.order) || 0) - (Number(b.order) || 0);
+    return orderCompare || a.name.localeCompare(b.name);
+  });
+}
+
+function normalizeFolderSiblingOrder(parentId) {
+  libraryFolderChildren(parentId).forEach((folder, index) => {
+    folder.order = index;
+  });
+}
+
+function sortedFolderItems(folder) {
+  const order = Array.isArray(folder.itemOrder) ? folder.itemOrder : [];
+  return libraryItems()
+    .filter(item => itemFolderIds(libraryItemKey(item.type, item.id)).includes(folder.id))
+    .sort((a, b) => {
+      const keyA = libraryItemKey(a.type, a.id);
+      const keyB = libraryItemKey(b.type, b.id);
+      const indexA = order.indexOf(keyA);
+      const indexB = order.indexOf(keyB);
+      if (indexA >= 0 && indexB >= 0) return indexA - indexB;
+      if (indexA >= 0) return -1;
+      if (indexB >= 0) return 1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
 function setItemFolderMembership(key, folderId, included) {
   const memberships = new Set(itemFolderIds(key));
   if (included) memberships.add(folderId);
   else memberships.delete(folderId);
   if (memberships.size) libraryAssignments[key] = [...memberships];
   else delete libraryAssignments[key];
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder) return;
+  folder.itemOrder ||= [];
+  if (included && !folder.itemOrder.includes(key)) {
+    folder.itemOrder.push(key);
+  } else if (!included) {
+    folder.itemOrder = folder.itemOrder.filter(itemKey => itemKey !== key);
+  }
 }
 
 function updateFormationPickerState(input) {
@@ -1442,6 +1496,8 @@ function customLibraryFileMarkup(item, folderId) {
         <span>${escapeHtml(displayName)}</span>
       </button>
       ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
+      <button class="library-action-button order-button" data-move-folder-item="${key}" data-move-folder-item-folder="${folderId}" data-move-direction="up">Up</button>
+      <button class="library-action-button order-button" data-move-folder-item="${key}" data-move-folder-item-folder="${folderId}" data-move-direction="down">Down</button>
       <button class="library-action-button danger" data-remove-folder-item="${key}" data-remove-from-folder="${folderId}">Remove</button>
     </div>
   `;
@@ -1543,12 +1599,8 @@ function folderPlayPickerMarkup(folderId) {
   `;
 }
 function customFolderMarkup(folder, depth = 0) {
-  const children = libraryFolders
-    .filter(candidate => candidate.parentId === folder.id)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const items = libraryItems()
-    .filter(item => itemFolderIds(libraryItemKey(item.type, item.id)).includes(folder.id))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const children = libraryFolderChildren(folder.id);
+  const items = sortedFolderItems(folder);
   return `
     <details class="custom-library-folder"${libraryFolderOpenAttribute(`custom:${folder.id}`)} style="--folder-depth:${depth}" data-folder-drop="${folder.id}" data-library-folder-state="custom:${folder.id}">
       <summary>
@@ -1559,6 +1611,8 @@ function customFolderMarkup(folder, depth = 0) {
       <div class="custom-folder-actions">
         <button class="library-action-button" data-add-subfolder="${folder.id}">+ Subfolder</button>
         <button class="library-action-button" data-open-folder-picker="${folder.id}">Manage Items</button>
+        <button class="library-action-button order-button" data-move-library-folder="${folder.id}" data-move-direction="up">Move Up</button>
+        <button class="library-action-button order-button" data-move-library-folder="${folder.id}" data-move-direction="down">Move Down</button>
         <button class="library-action-button" data-rename-folder="${folder.id}">Rename</button>
         <button class="library-action-button danger" data-delete-folder="${folder.id}">Delete</button>
       </div>
@@ -1572,9 +1626,9 @@ function customFolderMarkup(folder, depth = 0) {
 }
 
 function customFolderBrowserMarkup() {
-  const roots = libraryFolders
-    .filter(folder => !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId))
-    .sort((a, b) => a.name.localeCompare(b.name));
+  const roots = sortLibraryFolderList(libraryFolders.filter(folder =>
+    !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId)
+  ));
   return `
     <section class="custom-folder-browser">
       <div class="custom-folder-heading">
@@ -1916,6 +1970,19 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-delete-folder]").forEach(button => {
     button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
   });
+  els.playbookLibrary.querySelectorAll("[data-move-library-folder]").forEach(button => {
+    button.addEventListener("click", () => moveLibraryFolder(
+      button.dataset.moveLibraryFolder,
+      button.dataset.moveDirection
+    ));
+  });
+  els.playbookLibrary.querySelectorAll("[data-move-folder-item]").forEach(button => {
+    button.addEventListener("click", () => moveFolderItem(
+      button.dataset.moveFolderItemFolder,
+      button.dataset.moveFolderItem,
+      button.dataset.moveDirection
+    ));
+  });
   els.playbookLibrary.querySelectorAll("[data-toggle-folder-item]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
@@ -2108,7 +2175,9 @@ function createLibraryFolder(parentId) {
   libraryFolders.push({
     id: crypto.randomUUID(),
     name: name.slice(0, 50),
-    parentId: parent?.id || null
+    parentId: parent?.id || null,
+    order: libraryFolderChildren(parent?.id || null).length,
+    itemOrder: []
   });
   lastSavedSignature = "";
   persistPlaybook();
@@ -2126,6 +2195,40 @@ function renameLibraryFolder(folderId) {
   persistPlaybook();
   renderPlaybookLibrary();
   showSaveSuccess("Folder renamed");
+}
+
+function moveLibraryFolder(folderId, direction) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder) return;
+  const parentId = folder.parentId || null;
+  normalizeFolderSiblingOrder(parentId);
+  const siblings = libraryFolderChildren(parentId);
+  const currentIndex = siblings.findIndex(candidate => candidate.id === folderId);
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= siblings.length) return;
+  const currentOrder = siblings[currentIndex].order;
+  siblings[currentIndex].order = siblings[targetIndex].order;
+  siblings[targetIndex].order = currentOrder;
+  normalizeFolderSiblingOrder(parentId);
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder order updated");
+}
+
+function moveFolderItem(folderId, key, direction) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder) return;
+  const orderedKeys = sortedFolderItems(folder).map(item => libraryItemKey(item.type, item.id));
+  const currentIndex = orderedKeys.indexOf(key);
+  const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+  if (currentIndex < 0 || targetIndex < 0 || targetIndex >= orderedKeys.length) return;
+  [orderedKeys[currentIndex], orderedKeys[targetIndex]] = [orderedKeys[targetIndex], orderedKeys[currentIndex]];
+  folder.itemOrder = orderedKeys;
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder item order updated");
 }
 
 function deleteLibraryFolder(folderId) {
@@ -2195,7 +2298,7 @@ function restorePreviousBackup() {
   }));
   plays = backup.plays.map(normalizePlay);
   defenses = backup.defenses.map(normalizeDefense);
-  libraryFolders = Array.isArray(backup.libraryFolders) ? backup.libraryFolders : [];
+  libraryFolders = normalizeLibraryFolders(backup.libraryFolders);
   libraryAssignments = normalizeLibraryAssignments(backup.libraryAssignments);
   draftPlay = null;
   selectedPlayId = plays[0].id;
@@ -2228,13 +2331,7 @@ async function importPlaybook(event) {
     }));
     plays = data.plays.map(normalizePlay);
     defenses = data.defenses.map(normalizeDefense);
-    libraryFolders = Array.isArray(data.libraryFolders)
-      ? data.libraryFolders.filter(folder => folder?.id && folder?.name).map(folder => ({
-          id: folder.id,
-          name: String(folder.name),
-          parentId: folder.parentId || null
-        }))
-      : [];
+    libraryFolders = normalizeLibraryFolders(data.libraryFolders);
     libraryAssignments = normalizeLibraryAssignments(data.libraryAssignments);
     draftPlay = data.draftPlay ? normalizePlay(data.draftPlay) : null;
     selectedPlayId = plays[0].id;
@@ -7083,9 +7180,7 @@ async function initializeApp() {
       plays = indexedBackup.plays.map(normalizePlay);
       formations = indexedBackup.formations;
       defenses = indexedBackup.defenses.map(normalizeDefense);
-      libraryFolders = Array.isArray(indexedBackup.libraryFolders)
-        ? indexedBackup.libraryFolders
-        : [];
+      libraryFolders = normalizeLibraryFolders(indexedBackup.libraryFolders);
       libraryAssignments = normalizeLibraryAssignments(indexedBackup.libraryAssignments);
       draftPlay = indexedBackup.draftPlay
         ? normalizePlay(indexedBackup.draftPlay)
@@ -7133,9 +7228,7 @@ function applySharedPlaybook(snapshot) {
   }));
   plays = snapshot.plays.map(normalizePlay);
   defenses = snapshot.defenses.map(normalizeDefense);
-  libraryFolders = Array.isArray(snapshot.libraryFolders)
-    ? snapshot.libraryFolders
-    : [];
+  libraryFolders = normalizeLibraryFolders(snapshot.libraryFolders);
   libraryAssignments = normalizeLibraryAssignments(snapshot.libraryAssignments);
   draftPlay = snapshot.draftPlay ? normalizePlay(snapshot.draftPlay) : null;
   selectedPlayId = plays.some(play => play.id === selectedPlayId)

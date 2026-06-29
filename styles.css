@@ -907,14 +907,20 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   display: flex;
   justify-content: flex-end;
   gap: 4px;
+  flex-wrap: wrap;
   border-top: 1px solid #e8eddc;
   background: #f8faef;
 }
 .custom-folder-actions .library-action-button { margin: 0; }
+.library-action-button.order-button {
+  min-width: 52px;
+  color: var(--green-dark);
+  background: #f2f8df;
+}
 .custom-folder-content { border-top: 1px solid #e8eddc; }
 .custom-library-file {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) repeat(4, auto);
   align-items: center;
   border-bottom: 1px solid #efede6;
   background: #fff;
@@ -2383,7 +2389,7 @@ body.create-defense #newPlayButton {
   .library-counts { width: 100%; }
   .library-transfer-actions { width: 100%; justify-content: flex-start; }
   .library-counts span { min-width: 0; flex: 1; }
-  .custom-library-file { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .custom-library-file { grid-template-columns: minmax(0, 1fr) repeat(4, auto); }
   .custom-folder-actions { flex-wrap: wrap; }
   .learning-strip { padding: 30px 22px; display: block; }
   .cue-details { margin-top: 25px; gap: 12px; justify-content: space-between; }
