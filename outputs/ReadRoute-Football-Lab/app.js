@@ -195,6 +195,7 @@ let testSessionPlayIds = [];
 let testSessionIndex = -1;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
+let libraryPreviewContext = null;
 let playbookTab = "all";
 let playbookSearchQuery = "";
 let activeFolderPickerId = null;
@@ -1493,7 +1494,7 @@ function customLibraryFileMarkup(item, folderId) {
   return `
     <div class="custom-library-file" data-folder-item-row="${key}" data-folder-item-folder="${folderId}">
       <span class="library-drag-handle" draggable="${cloudAccessRole !== "viewer"}" data-drag-folder-item="${key}" data-drag-folder-item-folder="${folderId}" title="Drag to reorder" aria-label="Drag to reorder"></span>
-      <button class="library-file ${item.type === "defense" ? "defense-file" : ""} ${libraryPreview.type === item.type && libraryPreview.id === item.id ? "active" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
+      <button class="library-file ${item.type === "defense" ? "defense-file" : ""} ${libraryPreview.type === item.type && libraryPreview.id === item.id ? "active" : ""}" ${previewAttribute} ${item.type === "play" ? `data-library-folder-context="${folderId}"` : ""} ${item.type === "formation" ? editAttribute : ""}>
         <span class="library-file-icon">${item.icon}</span>
         <span>${escapeHtml(displayName)}</span>
       </button>
@@ -1789,7 +1790,7 @@ function playbookSearchResultsMarkup() {
   `;
 }
 
-function selectLibraryPreview(type, id) {
+function selectLibraryPreview(type, id, context = null) {
   const pageScroll = {
     x: window.scrollX,
     y: window.scrollY
@@ -1804,6 +1805,7 @@ function selectLibraryPreview(type, id) {
     document.activeElement.blur();
   }
   libraryPreview = { type, id };
+  libraryPreviewContext = type === "play" ? context : null;
   renderPlaybookLibrary();
 
   const restoreScroll = () => {
@@ -1816,6 +1818,28 @@ function selectLibraryPreview(type, id) {
   };
   restoreScroll();
   requestAnimationFrame(restoreScroll);
+}
+
+function libraryPreviewFolderPlays() {
+  if (libraryPreview.type !== "play" || libraryPreviewContext?.type !== "folder") return [];
+  const folder = libraryFolders.find(candidate => candidate.id === libraryPreviewContext.folderId);
+  if (!folder) return [];
+  return sortedFolderItems(folder)
+    .filter(item => item.type === "play")
+    .map(item => plays.find(play => play.id === item.id))
+    .filter(Boolean);
+}
+
+function libraryPreviewNavigation() {
+  const folderPlays = libraryPreviewFolderPlays();
+  const index = folderPlays.findIndex(play => play.id === libraryPreview.id);
+  if (index < 0 || folderPlays.length < 2) return null;
+  return {
+    folderPlays,
+    previous: folderPlays[index - 1] || null,
+    next: folderPlays[index + 1] || null,
+    index
+  };
 }
 
 function renderPlaybookLibrary() {
@@ -1916,13 +1940,31 @@ function renderPlaybookLibrary() {
 
   els.playbookLibrary.querySelectorAll("[data-library-play]").forEach(button => {
     button.addEventListener("click", () => {
-      selectLibraryPreview("play", button.dataset.libraryPlay);
+      selectLibraryPreview(
+        "play",
+        button.dataset.libraryPlay,
+        button.dataset.libraryFolderContext
+          ? { type: "folder", folderId: button.dataset.libraryFolderContext }
+          : null
+      );
     });
   });
 
   els.playbookLibrary.querySelectorAll("[data-library-defense]").forEach(button => {
     button.addEventListener("click", () => {
       selectLibraryPreview("defense", button.dataset.libraryDefense);
+    });
+  });
+
+  els.playbookLibrary.querySelectorAll("[data-library-preview-step]").forEach(button => {
+    button.addEventListener("click", () => {
+      const navigation = libraryPreviewNavigation();
+      if (!navigation) return;
+      const target = button.dataset.libraryPreviewStep === "previous"
+        ? navigation.previous
+        : navigation.next;
+      if (!target) return;
+      selectLibraryPreview("play", target.id, libraryPreviewContext);
     });
   });
 
@@ -2682,6 +2724,21 @@ function libraryPreviewMarkup() {
   const offenseLabels = isDefense
     ? formation.labels
     : item.labels || formation.labels;
+  const navigation = libraryPreviewNavigation();
+  const navigationMarkup = navigation ? `
+    <button
+      class="library-preview-nav previous"
+      data-library-preview-step="previous"
+      aria-label="Previous play in folder"
+      ${navigation.previous ? "" : "disabled"}
+    >&#8592;</button>
+    <button
+      class="library-preview-nav next"
+      data-library-preview-step="next"
+      aria-label="Next play in folder"
+      ${navigation.next ? "" : "disabled"}
+    >&#8594;</button>
+  ` : "";
   const routeMarkup = isDefense ? "" : skillPositions.map(position => {
     const playerColor = positionColor(position.id, "offense");
     const route = item.routes[position.id] || [];
@@ -2811,6 +2868,7 @@ function libraryPreviewMarkup() {
       <span class="library-field-standard">${escapeHtml(fieldStandards[fieldStandard].label)} field</span>
     </div>
     <div class="library-field-frame">
+    ${navigationMarkup}
     <svg viewBox="0 0 ${fieldWidth} ${fieldHeight}" aria-label="${escapeHtml(item.name)} preview">
       <defs>
         <marker id="libraryArrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>

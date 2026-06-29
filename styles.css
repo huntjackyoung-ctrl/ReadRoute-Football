@@ -709,11 +709,38 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   text-transform: uppercase;
 }
 .library-field-frame {
+  position: relative;
   overflow: hidden;
   border: 6px solid #fff;
   border-radius: 10px;
   background: #174c35;
   box-shadow: 0 8px 24px rgba(11,30,22,.15);
+}
+.library-preview-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 3;
+  width: 42px;
+  height: 72px;
+  border: 1px solid rgba(255,255,255,.58);
+  color: #10231c;
+  background: rgba(201,244,92,.9);
+  font-size: 30px;
+  font-weight: 950;
+  transform: translateY(-50%);
+  box-shadow: 0 8px 22px rgba(11,30,22,.24);
+}
+.library-preview-nav.previous {
+  left: 10px;
+  border-radius: 999px 8px 8px 999px;
+}
+.library-preview-nav.next {
+  right: 10px;
+  border-radius: 8px 999px 999px 8px;
+}
+.library-preview-nav:disabled {
+  opacity: .25;
+  cursor: not-allowed;
 }
 .library-preview svg {
   width: 100%;
