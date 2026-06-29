@@ -939,6 +939,32 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   display: grid;
   background: #fff;
 }
+.folder-picker-search {
+  padding: 14px 14px 0;
+}
+.folder-picker-search label {
+  display: block;
+  margin: 0 0 7px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 900;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.folder-picker-search-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+.folder-picker-search input {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink);
+  background: #fff;
+  font: 800 13px Inter, sans-serif;
+}
 .folder-picker-scroll {
   padding: 14px;
   overflow: visible;

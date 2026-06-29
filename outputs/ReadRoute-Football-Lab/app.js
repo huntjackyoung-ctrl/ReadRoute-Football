@@ -198,11 +198,13 @@ let libraryPreview = { type: "play", id: selectedPlayId };
 let playbookTab = "all";
 let playbookSearchQuery = "";
 let activeFolderPickerId = null;
+let activeFolderPickerSearch = "";
 let trenchesState = loadTrenchesState();
 let trenchesDrag = null;
 let trenchesAnimation = null;
 let trenchesAnimationFrame = null;
 const libraryFolderOpenState = new Map();
+const folderPickerOpenState = new Map();
 const runFolderOpenState = new Map();
 let saveToastTimer = null;
 let autosaveTimer = null;
@@ -1390,10 +1392,31 @@ function rememberLibraryFolderState() {
     .forEach(folder => {
       libraryFolderOpenState.set(folder.dataset.libraryFolderState, folder.open);
     });
+  els.playbookLibrary
+    ?.querySelectorAll("[data-folder-picker-state]")
+    .forEach(folder => {
+      folderPickerOpenState.set(folder.dataset.folderPickerState, folder.open);
+    });
 }
 
 function libraryFolderOpenAttribute(key) {
   return libraryFolderOpenState.get(key) === true ? " open" : "";
+}
+
+function folderPickerOpenAttribute(key, hasSearchMatch = false) {
+  return folderPickerOpenState.get(key) === true || (normalizedFolderPickerSearch() && hasSearchMatch)
+    ? " open"
+    : "";
+}
+
+function normalizedFolderPickerSearch() {
+  return activeFolderPickerSearch.trim().toLowerCase();
+}
+
+function folderPickerPlayMatches(play, formationName) {
+  const query = normalizedFolderPickerSearch();
+  if (!query) return true;
+  return `${play.name} ${formationName}`.toLowerCase().includes(query);
 }
 
 function customLibraryFileMarkup(item, folderId) {
@@ -1425,6 +1448,7 @@ function customLibraryFileMarkup(item, folderId) {
 }
 
 function folderPlayPickerMarkup(folderId) {
+  const searchQuery = normalizedFolderPickerSearch();
   const folderItemButton = (key, included, addLabel = "Add", removeLabel = "Remove") => `
     <button
       type="button"
@@ -1438,33 +1462,44 @@ function folderPlayPickerMarkup(folderId) {
   const formationCards = formations.map(formation => {
     const formationKey = libraryItemKey("formation", formation.id);
     const formationSelected = itemFolderIds(formationKey).includes(folderId);
-    const formationPlays = plays
+    const allFormationPlays = plays
       .filter(play => play.formationId === formation.id)
       .sort((a, b) => a.name.localeCompare(b.name));
-    const selectedCount = formationPlays.filter(play =>
+    const formationNameMatches = searchQuery && formation.name.toLowerCase().includes(searchQuery);
+    const formationPlays = searchQuery && !formationNameMatches
+      ? allFormationPlays.filter(play => folderPickerPlayMatches(play, formation.name))
+      : allFormationPlays;
+    if (searchQuery && !formationNameMatches && !formationPlays.length) return "";
+    const selectedCount = allFormationPlays.filter(play =>
       itemFolderIds(libraryItemKey("play", play.id)).includes(folderId)
     ).length;
-    const allSelected = formationPlays.length > 0 && selectedCount === formationPlays.length;
+    const visibleSelectedCount = formationPlays.filter(play =>
+      itemFolderIds(libraryItemKey("play", play.id)).includes(folderId)
+    ).length;
+    const allSelected = allFormationPlays.length > 0 && selectedCount === allFormationPlays.length;
+    const visibleAllSelected = formationPlays.length > 0 && visibleSelectedCount === formationPlays.length;
+    const pickerKey = `picker:${folderId}:${formation.id}`;
     return `
-      <details class="folder-pick-card">
+      <details class="folder-pick-card" data-folder-picker-state="${pickerKey}"${folderPickerOpenAttribute(pickerKey, Boolean(searchQuery))}>
         <summary class="folder-pick-card-header">
           <span class="folder-pick-badge">Formation</span>
           <strong>${escapeHtml(formation.name)}</strong>
-          <small>${selectedCount}/${formationPlays.length} plays</small>
+          <small>${selectedCount}/${allFormationPlays.length} plays</small>
           ${folderItemButton(formationKey, formationSelected, "Add Form", "Remove")}
         </summary>
         <div class="folder-pick-card-body">
           ${formationPlays.length ? `
             <div class="folder-pick-row all">
               <span class="folder-pick-spacer"></span>
-              <strong>All plays in ${escapeHtml(formation.name)}</strong>
+              <strong>${searchQuery && !formationNameMatches ? "All matching plays" : `All plays in ${escapeHtml(formation.name)}`}</strong>
               <button
                 type="button"
-                class="folder-picker-action ${allSelected ? "is-selected" : ""}"
+                class="folder-picker-action ${(searchQuery && !formationNameMatches ? visibleAllSelected : allSelected) ? "is-selected" : ""}"
                 data-toggle-formation-plays="${formation.id}"
                 data-folder-id="${folderId}"
-                data-folder-included="${allSelected ? "true" : "false"}"
-              >${allSelected ? "Remove All" : "Add All"}</button>
+                data-folder-visible-play-ids="${formationPlays.map(play => play.id).join(",")}"
+                data-folder-included="${(searchQuery && !formationNameMatches ? visibleAllSelected : allSelected) ? "true" : "false"}"
+              >${(searchQuery && !formationNameMatches ? visibleAllSelected : allSelected) ? "Remove All" : "Add All"}</button>
             </div>
             ${formationPlays.map(play => {
               const key = libraryItemKey("play", play.id);
@@ -1478,7 +1513,7 @@ function folderPlayPickerMarkup(folderId) {
               `;
             }).join("")}
           ` : `
-            <p class="library-empty">No plays saved for this formation. You can still add the formation above.</p>
+            <p class="library-empty">${searchQuery ? "No matching plays in this formation." : "No plays saved for this formation. You can still add the formation above."}</p>
           `}
         </div>
       </details>
@@ -1487,9 +1522,22 @@ function folderPlayPickerMarkup(folderId) {
 
   return `
     <div class="folder-membership-list">
+      <div class="folder-picker-search">
+        <label for="folderPickerSearchInput">Search plays to add</label>
+        <div class="folder-picker-search-row">
+          <input
+            id="folderPickerSearchInput"
+            type="search"
+            placeholder="Search by play or formation..."
+            value="${escapeHtml(activeFolderPickerSearch)}"
+            autocomplete="off"
+          >
+          <button class="library-action-button" data-clear-folder-picker-search ${activeFolderPickerSearch ? "" : "disabled"}>Clear</button>
+        </div>
+      </div>
       <div class="folder-picker-scroll">
         <p class="folder-picker-heading">Plays by formation</p>
-        ${formationCards || `<p class="library-empty">No formations saved yet.</p>`}
+        ${formationCards || `<p class="library-empty">${searchQuery ? "No plays match that search." : "No formations saved yet."}</p>`}
       </div>
     </div>
   `;
@@ -1857,6 +1905,7 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-open-folder-picker]").forEach(button => {
     button.addEventListener("click", () => {
       activeFolderPickerId = button.dataset.openFolderPicker;
+      activeFolderPickerSearch = "";
       playbookTab = "folders";
       renderPlaybookLibrary();
     });
@@ -1887,8 +1936,13 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-toggle-formation-plays]").forEach(button => {
     button.addEventListener("click", () => {
       const included = button.dataset.folderIncluded === "true";
-      plays
-        .filter(play => play.formationId === button.dataset.toggleFormationPlays)
+      const visiblePlayIds = (button.dataset.folderVisiblePlayIds || "")
+        .split(",")
+        .filter(Boolean);
+      const targetPlays = visiblePlayIds.length
+        ? plays.filter(play => visiblePlayIds.includes(play.id))
+        : plays.filter(play => play.formationId === button.dataset.toggleFormationPlays);
+      targetPlays
         .forEach(play => {
           setItemFolderMembership(
             libraryItemKey("play", play.id),
@@ -1902,6 +1956,22 @@ function renderPlaybookLibrary() {
       showSaveSuccess(included ? "Formation plays removed from folder" : "Formation plays added to folder");
     });
   });
+  const folderPickerSearchInput = els.playbookLibrary.querySelector("#folderPickerSearchInput");
+  folderPickerSearchInput?.addEventListener("input", () => {
+    activeFolderPickerSearch = folderPickerSearchInput.value;
+    renderPlaybookLibrary();
+    requestAnimationFrame(() => {
+      const updatedInput = els.playbookLibrary.querySelector("#folderPickerSearchInput");
+      if (!updatedInput) return;
+      updatedInput.focus();
+      updatedInput.setSelectionRange(updatedInput.value.length, updatedInput.value.length);
+    });
+  });
+  els.playbookLibrary.querySelector("[data-clear-folder-picker-search]")
+    ?.addEventListener("click", () => {
+      activeFolderPickerSearch = "";
+      renderPlaybookLibrary();
+    });
   els.playbookLibrary.querySelectorAll("[data-folder-membership]").forEach(input => {
     input.addEventListener("click", event => {
       if (input.closest("summary")) event.stopPropagation();
