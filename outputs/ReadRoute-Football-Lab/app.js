@@ -206,6 +206,7 @@ let trenchesAnimationFrame = null;
 const libraryFolderOpenState = new Map();
 const folderPickerOpenState = new Map();
 const runFolderOpenState = new Map();
+let libraryDragState = null;
 let saveToastTimer = null;
 let autosaveTimer = null;
 let lastSavedSignature = "";
@@ -1490,14 +1491,13 @@ function customLibraryFileMarkup(item, folderId) {
       : "";
   const editAttribute = `data-edit-${item.type}="${item.id}"`;
   return `
-    <div class="custom-library-file" draggable="${cloudAccessRole !== "viewer"}" data-drag-library-item="${key}">
+    <div class="custom-library-file" data-folder-item-row="${key}" data-folder-item-folder="${folderId}">
+      <span class="library-drag-handle" draggable="${cloudAccessRole !== "viewer"}" data-drag-folder-item="${key}" data-drag-folder-item-folder="${folderId}" title="Drag to reorder" aria-label="Drag to reorder"></span>
       <button class="library-file ${item.type === "defense" ? "defense-file" : ""} ${libraryPreview.type === item.type && libraryPreview.id === item.id ? "active" : ""}" ${previewAttribute} ${item.type === "formation" ? editAttribute : ""}>
         <span class="library-file-icon">${item.icon}</span>
         <span>${escapeHtml(displayName)}</span>
       </button>
       ${item.type !== "formation" ? `<button class="library-action-button" ${editAttribute}>Edit</button>` : ""}
-      <button class="library-action-button order-button" data-move-folder-item="${key}" data-move-folder-item-folder="${folderId}" data-move-direction="up">Up</button>
-      <button class="library-action-button order-button" data-move-folder-item="${key}" data-move-folder-item-folder="${folderId}" data-move-direction="down">Down</button>
       <button class="library-action-button danger" data-remove-folder-item="${key}" data-remove-from-folder="${folderId}">Remove</button>
     </div>
   `;
@@ -1602,8 +1602,9 @@ function customFolderMarkup(folder, depth = 0) {
   const children = libraryFolderChildren(folder.id);
   const items = sortedFolderItems(folder);
   return `
-    <details class="custom-library-folder"${libraryFolderOpenAttribute(`custom:${folder.id}`)} style="--folder-depth:${depth}" data-folder-drop="${folder.id}" data-library-folder-state="custom:${folder.id}">
+    <details class="custom-library-folder"${libraryFolderOpenAttribute(`custom:${folder.id}`)} style="--folder-depth:${depth}" data-folder-drop="${folder.id}" data-folder-row="${folder.id}" data-library-folder-state="custom:${folder.id}">
       <summary>
+        <span class="library-drag-handle folder-handle" draggable="${cloudAccessRole !== "viewer"}" data-drag-library-folder="${folder.id}" title="Drag folder to reorder" aria-label="Drag folder to reorder"></span>
         <span class="library-folder-icon">F</span>
         <span>${escapeHtml(folder.name)}</span>
         <small>${children.length + items.length}</small>
@@ -1611,12 +1612,10 @@ function customFolderMarkup(folder, depth = 0) {
       <div class="custom-folder-actions">
         <button class="library-action-button" data-add-subfolder="${folder.id}">+ Subfolder</button>
         <button class="library-action-button" data-open-folder-picker="${folder.id}">Manage Items</button>
-        <button class="library-action-button order-button" data-move-library-folder="${folder.id}" data-move-direction="up">Move Up</button>
-        <button class="library-action-button order-button" data-move-library-folder="${folder.id}" data-move-direction="down">Move Down</button>
         <button class="library-action-button" data-rename-folder="${folder.id}">Rename</button>
         <button class="library-action-button danger" data-delete-folder="${folder.id}">Delete</button>
       </div>
-      <div class="custom-folder-content">
+      <div class="custom-folder-content" data-folder-content="${folder.id}">
         ${children.map(child => customFolderMarkup(child, depth + 1)).join("")}
         ${items.map(item => customLibraryFileMarkup(item, folder.id)).join("")}
         ${!children.length && !items.length ? `<p class="library-empty">This folder is empty.</p>` : ""}
@@ -1970,19 +1969,6 @@ function renderPlaybookLibrary() {
   els.playbookLibrary.querySelectorAll("[data-delete-folder]").forEach(button => {
     button.addEventListener("click", () => deleteLibraryFolder(button.dataset.deleteFolder));
   });
-  els.playbookLibrary.querySelectorAll("[data-move-library-folder]").forEach(button => {
-    button.addEventListener("click", () => moveLibraryFolder(
-      button.dataset.moveLibraryFolder,
-      button.dataset.moveDirection
-    ));
-  });
-  els.playbookLibrary.querySelectorAll("[data-move-folder-item]").forEach(button => {
-    button.addEventListener("click", () => moveFolderItem(
-      button.dataset.moveFolderItemFolder,
-      button.dataset.moveFolderItem,
-      button.dataset.moveDirection
-    ));
-  });
   els.playbookLibrary.querySelectorAll("[data-toggle-folder-item]").forEach(button => {
     button.addEventListener("click", event => {
       event.stopPropagation();
@@ -2117,16 +2103,115 @@ function renderPlaybookLibrary() {
       showSaveSuccess("Removed from folder");
     });
   });
-  els.playbookLibrary.querySelectorAll("[data-drag-library-item]").forEach(row => {
-    row.addEventListener("dragstart", event => {
+  els.playbookLibrary.querySelectorAll("[data-drag-folder-item]").forEach(handle => {
+    handle.addEventListener("click", event => event.stopPropagation());
+    handle.addEventListener("dragstart", event => {
+      const row = handle.closest(".custom-library-file");
+      event.stopPropagation();
       event.dataTransfer.effectAllowed = "move";
-      event.dataTransfer.setData("text/plain", row.dataset.dragLibraryItem);
-      row.classList.add("dragging");
+      setLibraryDragData(event, {
+        kind: "folder-item",
+        key: handle.dataset.dragFolderItem,
+        folderId: handle.dataset.dragFolderItemFolder
+      });
+      row?.classList.add("dragging");
     });
-    row.addEventListener("dragend", () => row.classList.remove("dragging"));
+    handle.addEventListener("dragend", () => {
+      clearLibraryDropIndicators();
+      handle.closest(".custom-library-file")?.classList.remove("dragging");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-drag-library-folder]").forEach(handle => {
+    handle.addEventListener("click", event => event.stopPropagation());
+    handle.addEventListener("dragstart", event => {
+      const folder = handle.closest(".custom-library-folder");
+      event.stopPropagation();
+      event.dataTransfer.effectAllowed = "move";
+      setLibraryDragData(event, {
+        kind: "folder",
+        folderId: handle.dataset.dragLibraryFolder
+      });
+      folder?.classList.add("dragging");
+    });
+    handle.addEventListener("dragend", () => {
+      clearLibraryDropIndicators();
+      handle.closest(".custom-library-folder")?.classList.remove("dragging");
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-folder-item-row]").forEach(row => {
+    row.addEventListener("dragover", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      showRowDropIndicator(row, event);
+    });
+    row.addEventListener("dragleave", event => {
+      if (!row.contains(event.relatedTarget)) row.classList.remove("drop-before", "drop-after");
+    });
+    row.addEventListener("drop", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = dropPlacement(row, event);
+      reorderFolderItem(
+        row.dataset.folderItemFolder,
+        drag.key,
+        row.dataset.folderItemRow,
+        placement
+      );
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-folder-row]").forEach(row => {
+    row.addEventListener("dragover", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder") return;
+      const targetFolder = libraryFolders.find(folder => folder.id === row.dataset.folderRow);
+      const draggedFolder = libraryFolders.find(folder => folder.id === drag.folderId);
+      if (!targetFolder || !draggedFolder || targetFolder.parentId !== draggedFolder.parentId) return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      showRowDropIndicator(row, event);
+    });
+    row.addEventListener("dragleave", event => {
+      if (!row.contains(event.relatedTarget)) row.classList.remove("drop-before", "drop-after");
+    });
+    row.addEventListener("drop", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder") return;
+      event.preventDefault();
+      event.stopPropagation();
+      const placement = dropPlacement(row, event);
+      reorderLibraryFolder(drag.folderId, row.dataset.folderRow, placement);
+    });
+  });
+  els.playbookLibrary.querySelectorAll("[data-folder-content]").forEach(content => {
+    content.addEventListener("dragover", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
+      event.preventDefault();
+      event.stopPropagation();
+      event.dataTransfer.dropEffect = "move";
+      content.classList.add("drop-at-end");
+    });
+    content.addEventListener("dragleave", event => {
+      if (!content.contains(event.relatedTarget)) content.classList.remove("drop-at-end");
+    });
+    content.addEventListener("drop", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
+      event.preventDefault();
+      event.stopPropagation();
+      reorderFolderItem(content.dataset.folderContent, drag.key, null, "after");
+    });
   });
   els.playbookLibrary.querySelectorAll("[data-folder-drop]").forEach(folder => {
     folder.addEventListener("dragover", event => {
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
       event.preventDefault();
       event.stopPropagation();
       event.dataTransfer.dropEffect = "move";
@@ -2138,7 +2223,9 @@ function renderPlaybookLibrary() {
     folder.addEventListener("drop", event => {
       event.preventDefault();
       event.stopPropagation();
-      const key = event.dataTransfer.getData("text/plain");
+      const drag = libraryDragData(event);
+      if (drag?.kind !== "folder-item") return;
+      const key = drag.key;
       const folderId = folder.dataset.folderDrop;
       if (!key || !folderId) return;
       setItemFolderMembership(key, folderId, true);
@@ -2229,6 +2316,86 @@ function moveFolderItem(folderId, key, direction) {
   persistPlaybook();
   renderPlaybookLibrary();
   showSaveSuccess("Folder item order updated");
+}
+
+function setLibraryDragData(event, data) {
+  libraryDragState = data;
+  event.dataTransfer.setData("application/readroute-library-drag", JSON.stringify(data));
+  if (data.key) event.dataTransfer.setData("text/plain", data.key);
+}
+
+function libraryDragData(event) {
+  if (libraryDragState) return libraryDragState;
+  try {
+    const data = event.dataTransfer.getData("application/readroute-library-drag");
+    return data ? JSON.parse(data) : null;
+  } catch {
+    return null;
+  }
+}
+
+function clearLibraryDropIndicators() {
+  libraryDragState = null;
+  els.playbookLibrary
+    ?.querySelectorAll(".drop-before, .drop-after, .drop-at-end, .drop-target, .dragging")
+    .forEach(element => element.classList.remove(
+      "drop-before",
+      "drop-after",
+      "drop-at-end",
+      "drop-target",
+      "dragging"
+    ));
+}
+
+function dropPlacement(row, event) {
+  const rect = row.getBoundingClientRect();
+  return event.clientY < rect.top + (rect.height / 2) ? "before" : "after";
+}
+
+function showRowDropIndicator(row, event) {
+  row.classList.remove("drop-before", "drop-after");
+  row.classList.add(dropPlacement(row, event) === "before" ? "drop-before" : "drop-after");
+}
+
+function reorderFolderItem(folderId, key, targetKey, placement) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder || !key) return;
+  setItemFolderMembership(key, folderId, true);
+  let orderedKeys = sortedFolderItems(folder)
+    .map(item => libraryItemKey(item.type, item.id))
+    .filter(itemKey => itemKey !== key);
+  if (targetKey && orderedKeys.includes(targetKey)) {
+    const targetIndex = orderedKeys.indexOf(targetKey);
+    orderedKeys.splice(placement === "before" ? targetIndex : targetIndex + 1, 0, key);
+  } else {
+    orderedKeys.push(key);
+  }
+  folder.itemOrder = orderedKeys;
+  clearLibraryDropIndicators();
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder order updated");
+}
+
+function reorderLibraryFolder(folderId, targetFolderId, placement) {
+  if (!folderId || !targetFolderId || folderId === targetFolderId) return;
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  const target = libraryFolders.find(candidate => candidate.id === targetFolderId);
+  if (!folder || !target || (folder.parentId || null) !== (target.parentId || null)) return;
+  const parentId = folder.parentId || null;
+  let siblings = libraryFolderChildren(parentId).filter(candidate => candidate.id !== folderId);
+  const targetIndex = siblings.findIndex(candidate => candidate.id === targetFolderId);
+  if (targetIndex < 0) return;
+  siblings.splice(placement === "before" ? targetIndex : targetIndex + 1, 0, folder);
+  siblings.forEach((candidate, index) => {
+    candidate.order = index;
+  });
+  clearLibraryDropIndicators();
+  lastSavedSignature = "";
+  persistPlaybook();
+  renderPlaybookLibrary();
+  showSaveSuccess("Folder order updated");
 }
 
 function deleteLibraryFolder(folderId) {
