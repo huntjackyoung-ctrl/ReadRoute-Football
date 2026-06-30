@@ -6390,8 +6390,10 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     choiceNoise: Math.random(),
     wrongChoice: Math.random(),
     settleNoise: Math.random(),
-    leverageNoise: (Math.random() - .5) * 18,
-    leanNoise: (Math.random() - .5) * .12,
+    landmarkX: (Math.random() - .5) * 42,
+    landmarkY: (Math.random() - .5) * 26,
+    leverageNoise: (Math.random() - .5) * 34,
+    leanNoise: (Math.random() - .5) * .22,
     manTarget
   };
 }
@@ -6407,14 +6409,14 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
       ? .5
       : .04;
   const mistakeMultiplier = profile.mistakeRate || 0;
-  const normalEyeRisk = .08 + mistakeMultiplier * .28 + ((1 - (profile.awareness || .7)) * .18);
+  const normalEyeRisk = .16 + mistakeMultiplier * .36 + ((1 - (profile.awareness || .7)) * .22);
   return {
     backfieldRead,
     biteRisk,
     falseStep: backfieldRead && profile.falseStep < biteRisk + mistakeMultiplier * .42,
     runBite: backfieldRead && profile.runBite < biteRisk,
     flatFoot: profile.flatFoot < normalEyeRisk,
-    wrongChoice: profile.wrongChoice < normalEyeRisk * .85,
+    wrongChoice: profile.wrongChoice < normalEyeRisk,
     delayedRouteRead: backfieldRead && (intent.playAction || intent.rpo),
     rpo: intent.rpo,
     playAction: intent.playAction
@@ -6489,7 +6491,7 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     + (receiverIndex * 3.71)
     + ((profile.repId || "").length * .37)
   );
-  const noiseWindow = 8 + ((profile.mistakeRate || 0) * 22) + ((1 - (profile.awareness || .7)) * 16);
+  const noiseWindow = 20 + ((profile.mistakeRate || 0) * 34) + ((1 - (profile.awareness || .7)) * 24);
   score += repNoise * noiseWindow;
   return score;
 }
@@ -6511,6 +6513,10 @@ function moveZoneDefender(
   state.profile = profile;
   state.repId ||= profile.repId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const influence = playInfluence(playIntent, profile);
+  const readLandmark = {
+    x: zone.x + (profile.landmarkX || 0),
+    y: zone.y + (profile.landmarkY || 0)
+  };
   const reactionTime = profile.reaction
     + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0)
     + (influence.flatFoot ? .1 + ((1 - (profile.awareness || .7)) * .14) : 0);
@@ -6545,8 +6551,8 @@ function moveZoneDefender(
   const runFitBite = influence.runBite && isLinebackerLevel && elapsed < reactionTime + .46;
   if (elapsed > .55 && !threats.length) {
     target = {
-      x: state.start.x + ((zone.x - state.start.x) * .22),
-      y: state.start.y + ((zone.y - state.start.y) * (isDeepSafety ? .08 : .2))
+      x: state.start.x + ((readLandmark.x - state.start.x) * .26),
+      y: state.start.y + ((readLandmark.y - state.start.y) * (isDeepSafety ? .1 : .24))
     };
   }
   if (runFitBite) {
@@ -6560,7 +6566,7 @@ function moveZoneDefender(
     mode = "bite";
     const stepDepth = isDeepSafety ? 18 : isHook ? 14 : 9;
     target = {
-      x: state.start.x + ((zone.x - state.start.x) * .08),
+      x: state.start.x + ((readLandmark.x - state.start.x) * .1),
       y: Math.min(lineOfScrimmage - 20, state.start.y + stepDepth)
     };
   }
@@ -6569,7 +6575,7 @@ function moveZoneDefender(
       .filter(receiver =>
         receiver.y <= deepThreatLine + 80
         && receiver.vy < 18
-        && Math.abs(receiver.x - zone.x) <= radii.x * 1.65
+        && Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
       )
       .sort((a, b) => a.y - b.y);
     if (influence.wrongChoice && verticalThreats.length > 1) {
@@ -6594,7 +6600,7 @@ function moveZoneDefender(
       state.deepThreatId = deepestThreat.id;
       state.primaryThreatId = deepestThreat.id;
       target = {
-        x: zone.x + ((splitX - zone.x + (profile.leverageNoise || 0)) * (hasDeepHelp ? .52 : .76)),
+        x: readLandmark.x + ((splitX - readLandmark.x + (profile.leverageNoise || 0)) * (hasDeepHelp ? .52 : .76)),
         y: Math.min(deepThreatLine, deepestThreat.y - (lateEyes ? profile.cushion * .45 : profile.cushion))
       };
       coverageClaims.set(
@@ -6605,17 +6611,19 @@ function moveZoneDefender(
   }
   if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
     const closeThreats = threats.filter(threat =>
-      threats[0].threatScore - threat.threatScore <= 16 + ((profile.mistakeRate || 0) * 18)
+      threats[0].threatScore - threat.threatScore <= 34 + ((profile.mistakeRate || 0) * 28)
     );
-    const primary = influence.wrongChoice && closeThreats.length > 1
-      ? closeThreats[Math.min(closeThreats.length - 1, 1 + Math.floor((profile.choiceNoise || 0) * (closeThreats.length - 1)))]
+    const shouldVaryChoice = closeThreats.length > 1
+      && (influence.wrongChoice || (profile.choiceNoise || 0) < .46);
+    const primary = shouldVaryChoice
+      ? closeThreats[Math.floor((profile.choiceNoise || 0) * 997) % closeThreats.length]
       : threats[0];
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
       mode = "midpoint";
       target = {
-        x: zone.x + ((primary.x - zone.x + (profile.leverageNoise || 0)) * .48),
+        x: readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
         y: Math.min(deepThreatLine, primary.y - profile.cushion)
       };
     } else {
@@ -6624,7 +6632,7 @@ function moveZoneDefender(
         && (primary.zoneDistance < 1.08 || profile.flatRally > .56 || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
       const shouldCarryVertical = primary.read.isVertical
         && (!hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
-        && primary.y < zone.y + radii.y * .28;
+        && primary.y < readLandmark.y + radii.y * .28;
       const shouldWallCrosser = isHook && primary.read.isCrosser;
       const overCarryMistake = shouldCarryVertical && hasDeepHelp && profile.overCarry < profile.mistakeRate + .16;
       if (shouldCarryVertical) {
@@ -6632,12 +6640,12 @@ function moveZoneDefender(
         target = {
           x: zone.x + ((primary.x - zone.x) * (overCarryMistake ? .78 : hasDeepHelp ? .42 : .62)),
           y: hasDeepHelp && !overCarryMistake
-            ? Math.max(zone.y - radii.y * .45, primary.y + 18)
+            ? Math.max(readLandmark.y - radii.y * .45, primary.y + 18)
             : Math.min(deepThreatLine + 40, primary.y - 10)
         };
       } else if (shouldRallyFlat) {
         mode = "rally";
-        const outsideLeverage = (primary.x < zone.x ? 18 : -18) + ((profile.leverageNoise || 0) * .35);
+        const outsideLeverage = (primary.x < readLandmark.x ? 18 : -18) + ((profile.leverageNoise || 0) * .35);
         target = {
           x: primary.x + outsideLeverage,
           y: primary.y - 6
@@ -6645,15 +6653,15 @@ function moveZoneDefender(
       } else if (shouldWallCrosser) {
         mode = "wall";
         target = {
-          x: zone.x + ((primary.x - zone.x) * .58),
-          y: Math.min(zone.y + radii.y * .22, primary.y - 10)
+          x: readLandmark.x + ((primary.x - readLandmark.x) * .58),
+          y: Math.min(readLandmark.y + radii.y * .22, primary.y - 10)
         };
       } else {
         mode = "spot";
         const lean = Math.max(.14, Math.min(.48, .22 + ((profile.aggressiveness || .5) * .18) + (profile.leanNoise || 0)));
         target = {
-          x: zone.x + ((primary.x - zone.x) * lean),
-          y: zone.y + ((primary.y - zone.y) * Math.min(.28, lean))
+          x: readLandmark.x + ((primary.x - readLandmark.x) * lean),
+          y: readLandmark.y + ((primary.y - readLandmark.y) * Math.min(.28, lean))
         };
       }
     }
@@ -6664,6 +6672,7 @@ function moveZoneDefender(
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
   } else if (mode !== "carry" && mode !== "rally" && mode !== "run-fit") {
+    target.x = Math.max(zone.x - radii.x * .82, Math.min(zone.x + radii.x * .82, target.x));
     target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
   }
 
@@ -6805,15 +6814,28 @@ function previewMovement(scope) {
         const manTarget = currentManAssignments()[id];
         const manTargetStart = editorOffensePositions()[manTarget] || start;
         const zoneAssignment = currentZoneAssignments()[id];
-        const routeDuration = pathDuration(start, route, baseSpeed);
-        const zoneStart = route.length
-          ? { ...route[route.length - 1] }
+        const repDelay = scope === "run" || scope === "test"
+          ? Math.random() * .28
+          : 0;
+        const repTempo = scope === "run" || scope === "test"
+          ? .82 + (Math.random() * .34)
+          : 1;
+        const animatedRoute = route.map((point, index) => ({
+          ...point,
+          x: point.x + ((Math.random() - .5) * Math.min(10, 3 + index * 1.5)),
+          y: point.y + ((Math.random() - .5) * Math.min(8, 2 + index * 1.2))
+        }));
+        const routeDuration = pathDuration(start, animatedRoute, baseSpeed * repTempo);
+        const zoneStart = animatedRoute.length
+          ? { ...animatedRoute[animatedRoute.length - 1] }
           : { ...start };
         return {
           id,
           start,
-          route,
+          route: animatedRoute,
           routeDuration,
+          repDelay,
+          repTempo,
           manTarget,
           zoneAssignment,
           manState: {
@@ -6877,7 +6899,7 @@ function previewMovement(scope) {
     0,
     ...offensePaths.map(path => pathDuration(path.snapStart, path.route, baseSpeed)),
     ...defensePaths.map(path =>
-      path.routeDuration + (path.zoneAssignment && !path.manTarget ? 5 : 0)
+      path.repDelay + path.routeDuration + (path.zoneAssignment && !path.manTarget ? 5 : 0)
     )
   );
   const totalDuration = maxMotionDuration + maxPostSnapDuration;
@@ -6934,16 +6956,27 @@ function previewMovement(scope) {
         start,
         route,
         routeDuration,
+        repDelay,
+        repTempo,
         manTarget,
         zoneAssignment,
         manState,
         zoneState
       }) => {
         const postSnapElapsed = elapsed - maxMotionDuration;
+        const defenderElapsed = postSnapElapsed - repDelay;
+        const defenderDelta = deltaSeconds * repTempo;
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = animationState.offense[manTarget] || targetStart;
           if (postSnapElapsed < 0) {
+            animationState.defense[id] = {
+              x: start.x + (targetPosition.x - targetStart.x),
+              y: start.y
+            };
+            return;
+          }
+          if (defenderElapsed < 0) {
             animationState.defense[id] = {
               x: start.x + (targetPosition.x - targetStart.x),
               y: start.y
@@ -6971,16 +7004,20 @@ function previewMovement(scope) {
           animationState.defense[id] = moveManDefender(
             manState,
             targetPosition,
-            postSnapElapsed,
-            deltaSeconds
+            defenderElapsed,
+            defenderDelta
           );
         } else if (zoneAssignment && postSnapElapsed >= 0) {
-          if (route.length && postSnapElapsed < routeDuration) {
+          if (defenderElapsed < 0) {
+            animationState.defense[id] = { ...start };
+            return;
+          }
+          if (route.length && defenderElapsed < routeDuration) {
             animationState.defense[id] = interpolateTimedPath(
               start,
               route,
-              postSnapElapsed,
-              baseSpeed
+              defenderElapsed,
+              baseSpeed * repTempo
             );
             return;
           }
@@ -7002,18 +7039,22 @@ function previewMovement(scope) {
             zoneState,
             zoneAssignment,
             receivers,
-            Math.max(0, postSnapElapsed - routeDuration),
-            deltaSeconds,
+            Math.max(0, defenderElapsed - routeDuration),
+            defenderDelta,
             hasDeepHelp,
             coverageClaims,
             activePlayIntent
           );
         } else if (postSnapElapsed >= 0) {
+          if (defenderElapsed < 0) {
+            animationState.defense[id] = { ...start };
+            return;
+          }
           animationState.defense[id] = interpolateTimedPath(
             start,
             route,
-            postSnapElapsed,
-            baseSpeed
+            defenderElapsed,
+            baseSpeed * repTempo
           );
         }
       });
