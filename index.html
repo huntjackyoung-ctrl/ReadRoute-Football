@@ -81,6 +81,17 @@
           <input id="playName" type="text" maxlength="40">
           <label class="field-label" for="playFormationSelect">Formation</label>
           <select id="playFormationSelect"></select>
+          <div class="play-intent-card">
+            <p class="eyebrow">Play intent</p>
+            <label class="toggle-row">
+              <input id="playActionToggle" type="checkbox">
+              <span>Play action</span>
+            </label>
+            <label class="toggle-row">
+              <input id="rpoToggle" type="checkbox">
+              <span>RPO / run conflict</span>
+            </label>
+          </div>
           <div class="button-row">
             <button id="newPlayButton" class="route-tool-button">New Play</button>
             <button id="savePlayButton" class="route-tool-button save-play-button">Save Play</button>
@@ -321,6 +332,32 @@
           <select id="defenseSelect"></select>
           <label class="field-label" for="defenseName">Defense name</label>
           <input id="defenseName" type="text" maxlength="40" placeholder="Red Pressure">
+          <div class="defense-realism-card">
+            <p class="eyebrow">Defensive realism</p>
+            <label class="field-label" for="coveragePersonalitySelect">Coverage personality</label>
+            <select id="coveragePersonalitySelect">
+              <option value="balanced">Balanced</option>
+              <option value="conservative">Conservative</option>
+              <option value="aggressive">Aggressive</option>
+              <option value="match">Match-heavy</option>
+              <option value="spot">Spot-drop</option>
+              <option value="undisciplined">Undisciplined</option>
+            </select>
+            <label class="field-label" for="eyeDisciplineSelect">Eyes</label>
+            <select id="eyeDisciplineSelect">
+              <option value="balanced">Balanced</option>
+              <option value="receiver">Receiver</option>
+              <option value="backfield">QB/backfield</option>
+              <option value="landmark">Zone landmark</option>
+              <option value="nearest">Nearest threat</option>
+            </select>
+            <div class="realism-slider-grid">
+              <label>Awareness <input id="awarenessInput" type="range" min="0" max="100" value="70"></label>
+              <label>Discipline <input id="disciplineInput" type="range" min="0" max="100" value="70"></label>
+              <label>Aggression <input id="aggressionInput" type="range" min="0" max="100" value="55"></label>
+              <label>Mistakes <input id="mistakeInput" type="range" min="0" max="100" value="35"></label>
+            </div>
+          </div>
           <div class="button-row">
             <button id="newDefenseButton" class="route-tool-button">New Defense</button>
             <button id="saveDefenseButton" class="route-tool-button">Save Defense</button>

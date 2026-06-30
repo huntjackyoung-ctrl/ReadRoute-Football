@@ -129,10 +129,56 @@ function createNote(text = "", x = 350, y = 250) {
   return { id: crypto.randomUUID(), text, x, y, width: 38, height: 44 };
 }
 
+function defaultPlayIntent() {
+  return {
+    playAction: false,
+    rpo: false
+  };
+}
+
+function normalizePlayIntent(intent = {}) {
+  return {
+    ...defaultPlayIntent(),
+    playAction: Boolean(intent.playAction),
+    rpo: Boolean(intent.rpo)
+  };
+}
+
+function defaultDefenseRealism() {
+  return {
+    personality: "balanced",
+    eyes: "balanced",
+    awareness: 70,
+    discipline: 70,
+    aggression: 55,
+    mistakes: 35
+  };
+}
+
+function normalizePercent(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : fallback;
+}
+
+function normalizeDefenseRealism(realism = {}) {
+  const defaults = defaultDefenseRealism();
+  const personalities = ["balanced", "conservative", "aggressive", "match", "spot", "undisciplined"];
+  const eyes = ["balanced", "receiver", "backfield", "landmark", "nearest"];
+  return {
+    personality: personalities.includes(realism.personality) ? realism.personality : defaults.personality,
+    eyes: eyes.includes(realism.eyes) ? realism.eyes : defaults.eyes,
+    awareness: normalizePercent(realism.awareness, defaults.awareness),
+    discipline: normalizePercent(realism.discipline, defaults.discipline),
+    aggression: normalizePercent(realism.aggression, defaults.aggression),
+    mistakes: normalizePercent(realism.mistakes, defaults.mistakes)
+  };
+}
+
 function createBlankPlay(name = "Untitled Play") {
   return {
     id: crypto.randomUUID(),
     name,
+    intent: defaultPlayIntent(),
     labels: { X: "X", H: "H", Y: "Y", Z: "Z", RB: "RB" },
     routes: { X: [], H: [], Y: [], Z: [], RB: [], QB: [] },
     routeOptions: { X: [], H: [], Y: [], Z: [], RB: [] },
@@ -147,6 +193,7 @@ function createBlankDefense(name = "Untitled Defense", labels = {}) {
   return {
     id: crypto.randomUUID(),
     name,
+    realism: defaultDefenseRealism(),
     positions: defaultDefensePositions(),
     routes: {},
     manAssignments: {},
@@ -217,6 +264,8 @@ if (!fieldStandards[fieldStandard]) fieldStandard = "highSchool";
 
 const els = {
   playName: document.querySelector("#playName"),
+  playActionToggle: document.querySelector("#playActionToggle"),
+  rpoToggle: document.querySelector("#rpoToggle"),
   playbookLibrary: document.querySelector("#playbookLibrary"),
   playEditorStatus: document.querySelector("#playEditorStatus"),
   formationSelect: document.querySelector("#formationSelect"),
@@ -239,6 +288,12 @@ const els = {
   testStatus: document.querySelector("#testStatus"),
   defenseSelect: document.querySelector("#defenseSelect"),
   defenseName: document.querySelector("#defenseName"),
+  coveragePersonalitySelect: document.querySelector("#coveragePersonalitySelect"),
+  eyeDisciplineSelect: document.querySelector("#eyeDisciplineSelect"),
+  awarenessInput: document.querySelector("#awarenessInput"),
+  disciplineInput: document.querySelector("#disciplineInput"),
+  aggressionInput: document.querySelector("#aggressionInput"),
+  mistakeInput: document.querySelector("#mistakeInput"),
   defenseAlignmentControls: document.querySelector("#defenseAlignmentControls"),
   defenseAlignmentFormationSelect: document.querySelector("#defenseAlignmentFormationSelect"),
   defenseAlignmentProgress: document.querySelector("#defenseAlignmentProgress"),
@@ -449,6 +504,7 @@ function normalizePlay(play) {
     : [];
   return {
     ...play,
+    intent: normalizePlayIntent(play.intent),
     labels: skillPositions.reduce((labels, position) => {
       labels[position.id] = play.labels?.[position.id] || position.id;
       return labels;
@@ -522,6 +578,7 @@ function loadFormations() {
 function normalizeDefense(defense) {
   return {
     ...defense,
+    realism: normalizeDefenseRealism(defense.realism),
     positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
     routes: defense.routes || {},
     manAssignments: defense.manAssignments || {},
@@ -566,6 +623,7 @@ function loadDefenses() {
     manAssignments: {},
     zoneAssignments: {},
     formationAlignments: {},
+    realism: defaultDefenseRealism(),
     labels: {},
     notes: []
   }];
@@ -794,7 +852,9 @@ function createRunScenario() {
     ),
     defenseRoutes: structuredClone(currentDefense().routes),
     manAssignments: structuredClone(currentDefense().manAssignments || {}),
-    zoneAssignments: structuredClone(currentDefense().zoneAssignments || {})
+    zoneAssignments: structuredClone(currentDefense().zoneAssignments || {}),
+    playIntent: normalizePlayIntent(currentPlay().intent),
+    defenseRealism: normalizeDefenseRealism(currentDefense().realism)
   };
 }
 
@@ -1191,6 +1251,9 @@ function renderPlayControls() {
   ).join("");
   els.playFormationSelect.value = currentPlay().formationId || selectedFormationId;
   els.playFormationSelect.disabled = !draftPlay;
+  const intent = normalizePlayIntent(currentPlay().intent);
+  if (els.playActionToggle) els.playActionToggle.checked = intent.playAction;
+  if (els.rpoToggle) els.rpoToggle.checked = intent.rpo;
   const sourceFormationId = currentPlay().formationId || selectedFormationId;
   const mirrorTargets = formations.filter(formation => formation.id !== sourceFormationId);
   els.mirrorPlayFormationSelect.innerHTML = mirrorTargets.length
@@ -2911,6 +2974,13 @@ function renderDefenseControls() {
   ).join("");
   els.defenseSelect.value = selectedDefenseId;
   els.defenseName.value = currentDefense().name;
+  const realism = normalizeDefenseRealism(currentDefense().realism);
+  if (els.coveragePersonalitySelect) els.coveragePersonalitySelect.value = realism.personality;
+  if (els.eyeDisciplineSelect) els.eyeDisciplineSelect.value = realism.eyes;
+  if (els.awarenessInput) els.awarenessInput.value = String(realism.awareness);
+  if (els.disciplineInput) els.disciplineInput.value = String(realism.discipline);
+  if (els.aggressionInput) els.aggressionInput.value = String(realism.aggression);
+  if (els.mistakeInput) els.mistakeInput.value = String(realism.mistakes);
   if (!formations.some(formation => formation.id === defenseAlignmentFormationId)) {
     defenseAlignmentFormationId = formations[0].id;
   }
@@ -5391,6 +5461,10 @@ function render() {
 document.querySelector("#savePlayButton").addEventListener("click", () => {
   currentPlay().name = els.playName.value.trim() || "Untitled Play";
   currentPlay().formationId = selectedFormationId;
+  currentPlay().intent = {
+    playAction: Boolean(els.playActionToggle?.checked),
+    rpo: Boolean(els.rpoToggle?.checked)
+  };
   if (draftPlay) {
     plays.push(draftPlay);
     selectedPlayId = draftPlay.id;
@@ -5437,6 +5511,18 @@ document.querySelector("#mirrorPlayButton").addEventListener("click", () => {
 
 els.playName.addEventListener("input", event => {
   currentPlay().name = event.target.value;
+});
+
+els.playActionToggle?.addEventListener("change", event => {
+  currentPlay().intent ||= defaultPlayIntent();
+  currentPlay().intent.playAction = event.target.checked;
+  savePlays();
+});
+
+els.rpoToggle?.addEventListener("change", event => {
+  currentPlay().intent ||= defaultPlayIntent();
+  currentPlay().intent.rpo = event.target.checked;
+  savePlays();
 });
 
 els.fieldStandardSelect.addEventListener("change", event => {
@@ -5984,11 +6070,41 @@ document.querySelector("#newDefenseButton").addEventListener("click", () => {
 
 document.querySelector("#saveDefenseButton").addEventListener("click", () => {
   currentDefense().name = els.defenseName.value.trim() || "Untitled Defense";
+  currentDefense().realism = readDefenseRealismControls();
   lastSavedSignature = "";
   const saved = persistPlaybook();
   showSaveSuccess(saved ? "Defense saved successfully" : "Save failed - download a backup");
   renderPlayControls();
   render();
+});
+
+function readDefenseRealismControls() {
+  return normalizeDefenseRealism({
+    personality: els.coveragePersonalitySelect?.value,
+    eyes: els.eyeDisciplineSelect?.value,
+    awareness: els.awarenessInput?.value,
+    discipline: els.disciplineInput?.value,
+    aggression: els.aggressionInput?.value,
+    mistakes: els.mistakeInput?.value
+  });
+}
+
+[
+  els.coveragePersonalitySelect,
+  els.eyeDisciplineSelect,
+  els.awarenessInput,
+  els.disciplineInput,
+  els.aggressionInput,
+  els.mistakeInput
+].forEach(input => {
+  input?.addEventListener("input", () => {
+    currentDefense().realism = readDefenseRealismControls();
+    saveDefenses();
+  });
+  input?.addEventListener("change", () => {
+    currentDefense().realism = readDefenseRealismControls();
+    saveDefenses();
+  });
 });
 
 els.runPlaySelect.addEventListener("change", event => {
@@ -6230,19 +6346,59 @@ function clampToZone(point, zone) {
   };
 }
 
-function createDefenderAiProfile(start, zone, manTarget = null) {
+function createDefenderAiProfile(start, zone, manTarget = null, realism = defaultDefenseRealism()) {
+  const settings = normalizeDefenseRealism(realism);
   const radii = zone ? zoneRadii(zone) : { x: 130, y: 130 };
   const deepPlayer = start.y < lineOfScrimmage - 190
     || (zone && zone.y < lineOfScrimmage - Math.max(155, radii.y * .75));
   const flatZone = zone && zone.y > lineOfScrimmage - 110;
+  const awareness = settings.awareness / 100;
+  const discipline = settings.discipline / 100;
+  const aggression = settings.aggression / 100;
+  const mistakes = settings.mistakes / 100;
+  const personality = settings.personality;
+  const matchBoost = personality === "match" ? .22 : personality === "spot" ? -.18 : 0;
+  const aggressionBoost = personality === "aggressive" ? .22 : personality === "conservative" ? -.16 : 0;
+  const disciplinePenalty = personality === "undisciplined" ? .22 : 0;
   return {
-    reaction: (deepPlayer ? .28 : flatZone ? .14 : .19) + (Math.random() * .12),
-    aggressiveness: .42 + (Math.random() * .36),
-    matchTendency: .48 + (Math.random() * .36),
-    flatRally: flatZone ? .42 + (Math.random() * .42) : .25 + (Math.random() * .28),
-    patience: deepPlayer ? .74 + (Math.random() * .18) : .46 + (Math.random() * .3),
+    reaction: (deepPlayer ? .34 : flatZone ? .18 : .23) - (awareness * .12) + (Math.random() * .14),
+    aggressiveness: Math.max(.15, Math.min(1, .22 + (aggression * .68) + aggressionBoost + (Math.random() * .16))),
+    matchTendency: Math.max(.1, Math.min(1, .34 + (discipline * .28) + (awareness * .18) + matchBoost + (Math.random() * .18))),
+    flatRally: flatZone
+      ? Math.max(.1, Math.min(1, .28 + (aggression * .48) + aggressionBoost + (Math.random() * .18)))
+      : Math.max(.1, Math.min(1, .18 + (aggression * .28) + (Math.random() * .14))),
+    patience: Math.max(.1, Math.min(1, (deepPlayer ? .54 : .34) + (discipline * .34) - aggressionBoost + (Math.random() * .12))),
     cushion: deepPlayer ? 34 + (Math.random() * 16) : 12 + (Math.random() * 10),
+    awareness,
+    discipline: Math.max(0, discipline - disciplinePenalty),
+    mistakeRate: Math.max(0, Math.min(1, mistakes + disciplinePenalty - (awareness * .18))),
+    eyes: settings.eyes,
+    personality,
+    falseStep: Math.random(),
+    overCarry: Math.random(),
+    jumpShort: Math.random(),
     manTarget
+  };
+}
+
+function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
+  const intent = normalizePlayIntent(playIntent);
+  const backfieldRead = profile.eyes === "backfield" || (
+    profile.eyes === "balanced" && (intent.playAction || intent.rpo)
+  );
+  const biteRisk = intent.playAction
+    ? .34
+    : intent.rpo
+      ? .22
+      : .04;
+  const mistakeMultiplier = profile.mistakeRate || 0;
+  return {
+    backfieldRead,
+    biteRisk,
+    falseStep: backfieldRead && profile.falseStep < biteRisk + mistakeMultiplier * .42,
+    delayedRouteRead: backfieldRead && (intent.playAction || intent.rpo),
+    rpo: intent.rpo,
+    playAction: intent.playAction
   };
 }
 
@@ -6319,14 +6475,16 @@ function moveZoneDefender(
   elapsed,
   deltaSeconds,
   hasDeepHelp = false,
-  coverageClaims = new Map()
+  coverageClaims = new Map(),
+  playIntent = defaultPlayIntent()
 ) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
   const style = zoneStyle(zone, state);
   const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
   const profile = state.profile || createDefenderAiProfile(state.start, zone);
   state.profile = profile;
-  const reactionTime = profile.reaction;
+  const influence = playInfluence(playIntent, profile);
+  const reactionTime = profile.reaction + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0);
   const deepThreatLine = Math.max(
     state.start.y,
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
@@ -6357,6 +6515,14 @@ function moveZoneDefender(
       y: state.start.y + ((zone.y - state.start.y) * (isDeepSafety ? .08 : .2))
     };
   }
+  if (influence.falseStep && elapsed < reactionTime + .22) {
+    mode = "bite";
+    const stepDepth = isDeepSafety ? 18 : isHook ? 14 : 9;
+    target = {
+      x: state.start.x + ((zone.x - state.start.x) * .08),
+      y: Math.min(lineOfScrimmage - 20, state.start.y + stepDepth)
+    };
+  }
   if (elapsed >= reactionTime && isDeepSafety) {
     const verticalThreats = receivers
       .filter(receiver =>
@@ -6377,13 +6543,14 @@ function moveZoneDefender(
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
-      carryingDeepThreat = true;
-      mode = "carry";
+      const lateEyes = influence.falseStep && elapsed < reactionTime + .42;
+      carryingDeepThreat = !lateEyes;
+      mode = lateEyes ? "recover" : "carry";
       state.deepThreatId = deepestThreat.id;
       state.primaryThreatId = deepestThreat.id;
       target = {
         x: zone.x + ((splitX - zone.x) * (hasDeepHelp ? .52 : .76)),
-        y: Math.min(deepThreatLine, deepestThreat.y - profile.cushion)
+        y: Math.min(deepThreatLine, deepestThreat.y - (lateEyes ? profile.cushion * .45 : profile.cushion))
       };
       coverageClaims.set(
         deepestThreat.id,
@@ -6404,16 +6571,17 @@ function moveZoneDefender(
     } else {
       const shouldRallyFlat = (isFlatDefender || isCurlFlat)
         && primary.read.isFlat
-        && (primary.zoneDistance < 1.08 || profile.flatRally > .56);
+        && (primary.zoneDistance < 1.08 || profile.flatRally > .56 || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
       const shouldCarryVertical = primary.read.isVertical
-        && (!hasDeepHelp || profile.matchTendency > .62)
+        && (!hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
         && primary.y < zone.y + radii.y * .28;
       const shouldWallCrosser = isHook && primary.read.isCrosser;
+      const overCarryMistake = shouldCarryVertical && hasDeepHelp && profile.overCarry < profile.mistakeRate + .16;
       if (shouldCarryVertical) {
         mode = "carry";
         target = {
-          x: zone.x + ((primary.x - zone.x) * (hasDeepHelp ? .42 : .62)),
-          y: hasDeepHelp
+          x: zone.x + ((primary.x - zone.x) * (overCarryMistake ? .78 : hasDeepHelp ? .42 : .62)),
+          y: hasDeepHelp && !overCarryMistake
             ? Math.max(zone.y - radii.y * .45, primary.y + 18)
             : Math.min(deepThreatLine + 40, primary.y - 10)
         };
@@ -6443,7 +6611,7 @@ function moveZoneDefender(
     state.primaryThreatId = null;
   }
   if (!carryingDeepThreat && mode !== "carry" && mode !== "rally") target = clampToZone(target, zone);
-  if (isDeepSafety) {
+  if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
   } else if (mode !== "carry" && mode !== "rally") {
     target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
@@ -6455,6 +6623,7 @@ function moveZoneDefender(
   const speedBoost = .86 + ((profile.aggressiveness || .5) * .32);
   const maxSpeed = (
     mode === "carry" ? 134
+      : mode === "recover" ? 150
       : mode === "rally" ? 120
         : mode === "wall" ? 104
           : isDeepSafety ? 72
@@ -6465,6 +6634,7 @@ function moveZoneDefender(
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
   const acceleration = (
     mode === "carry" ? 650
+      : mode === "recover" ? 780
       : mode === "rally" ? 540
         : mode === "wall" ? 500
           : isDeepSafety ? 320
@@ -6489,7 +6659,7 @@ function moveZoneDefender(
   state.y += proposedDy * frameRatio;
   state.x = Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, state.x));
   state.y = Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, state.y));
-  if (isDeepSafety && state.y > deepThreatLine) {
+  if (isDeepSafety && mode !== "bite" && state.y > deepThreatLine) {
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
   }
@@ -6545,6 +6715,12 @@ function previewMovement(scope) {
           : postSnapRoute(id, start)
       }))
     : [];
+  const activePlayIntent = scope === "run" || scope === "test"
+    ? normalizePlayIntent(runScenario?.playIntent || currentPlay().intent)
+    : normalizePlayIntent(currentPlay().intent);
+  const activeDefenseRealism = scope === "run" || scope === "test"
+    ? normalizeDefenseRealism(runScenario?.defenseRealism || currentDefense().realism)
+    : normalizeDefenseRealism(currentDefense().realism);
   const defensePaths = animateDefense
     ? Object.entries(defenderStarts).map(([id, start]) => {
         const route = scope === "run" || scope === "test"
@@ -6591,7 +6767,7 @@ function previewMovement(scope) {
             vx: 0,
             vy: 0,
             start: zoneStart,
-            profile: createDefenderAiProfile(zoneStart, zoneAssignment, manTarget),
+            profile: createDefenderAiProfile(zoneStart, zoneAssignment, manTarget, activeDefenseRealism),
             primaryThreatId: null,
             deepThreatId: null
           }
@@ -6740,7 +6916,8 @@ function previewMovement(scope) {
             Math.max(0, postSnapElapsed - routeDuration),
             deltaSeconds,
             hasDeepHelp,
-            coverageClaims
+            coverageClaims,
+            activePlayIntent
           );
         } else if (postSnapElapsed >= 0) {
           animationState.defense[id] = interpolateTimedPath(

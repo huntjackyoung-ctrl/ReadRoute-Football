@@ -1167,6 +1167,47 @@ input, select {
 }
 input:focus, select:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(23,76,53,.09); }
 
+.play-intent-card,
+.defense-realism-card {
+  margin: 12px 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: #fbfaf3;
+}
+
+.toggle-row {
+  margin-top: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 850;
+}
+
+.toggle-row input { accent-color: var(--green); }
+
+.realism-slider-grid {
+  margin-top: 10px;
+  display: grid;
+  gap: 8px;
+}
+
+.realism-slider-grid label {
+  display: grid;
+  grid-template-columns: 78px 1fr;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: .06em;
+}
+
+.realism-slider-grid input { accent-color: var(--green); }
+
 .assignment-heading {
   margin: 22px 0 7px;
   padding: 0 3px;
