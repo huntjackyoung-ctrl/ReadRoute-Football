@@ -6389,6 +6389,8 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     flatFoot: Math.random(),
     choiceNoise: Math.random(),
     wrongChoice: Math.random(),
+    safetyChoice: Math.random(),
+    safetyModeRoll: Math.random(),
     settleNoise: Math.random(),
     landmarkX: (Math.random() - .5) * 42,
     landmarkY: (Math.random() - .5) * 26,
@@ -6421,6 +6423,54 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
     rpo: intent.rpo,
     playAction: intent.playAction
   };
+}
+
+function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp) {
+  if (verticalThreatCount < 2) return "attach";
+  const roll = profile.safetyModeRoll || 0;
+  const mistakeRate = profile.mistakeRate || 0;
+  const discipline = profile.discipline || .7;
+  if (roll < .24 + (discipline * .16)) return "midpoint";
+  if (roll < .44) return "attach-left";
+  if (roll < .64) return "attach-right";
+  if (roll < .78 + mistakeRate * .12) return "jump-near";
+  if (roll < .9 || hasDeepHelp) return "overplay-deepest";
+  return "late";
+}
+
+function chooseCloseThreat(threats, profile, influence, spread = 28) {
+  if (!threats.length) return null;
+  const window = spread + ((profile.mistakeRate || 0) * 32) + ((1 - (profile.awareness || .7)) * 18);
+  const closeThreats = threats.filter(threat =>
+    threats[0].threatScore - threat.threatScore <= window
+  );
+  if (closeThreats.length <= 1) return threats[0];
+  const shouldVary = influence.wrongChoice
+    || (profile.choiceNoise || 0) < .55
+    || (profile.personality === "aggressive" && (profile.jumpShort || 0) < .62);
+  if (!shouldVary) return threats[0];
+  const index = Math.floor(((profile.choiceNoise || 0) * 1009) + ((profile.safetyChoice || 0) * 97))
+    % closeThreats.length;
+  return closeThreats[index];
+}
+
+function committedThreat(threats, state, profile, influence, elapsed, spread = 28) {
+  if (!threats.length) return null;
+  const current = state.primaryThreatId
+    ? threats.find(threat => threat.id === state.primaryThreatId)
+    : null;
+  const holdUntil = state.commitUntil || 0;
+  if (current && elapsed < holdUntil) {
+    const topThreatClearlyBetter = threats[0]
+      && threats[0].id !== current.id
+      && threats[0].threatScore - current.threatScore > 42 + ((profile.discipline || .7) * 18);
+    if (!topThreatClearlyBetter) return current;
+  }
+  const next = chooseCloseThreat(threats, profile, influence, spread);
+  if (next) {
+    state.commitUntil = elapsed + .32 + ((profile.discipline || .7) * .28);
+  }
+  return next;
 }
 
 function zoneStyle(zone, state) {
@@ -6585,45 +6635,63 @@ function moveZoneDefender(
     if (verticalThreats.length) {
       const deepestThreat = verticalThreats[0];
       const nearbyVerticals = verticalThreats.filter(receiver =>
-        receiver.y <= deepestThreat.y + 55
+        receiver.y <= deepestThreat.y + 80
       );
       const leftmost = nearbyVerticals.reduce((left, receiver) =>
         receiver.x < left.x ? receiver : left, deepestThreat);
       const rightmost = nearbyVerticals.reduce((right, receiver) =>
         receiver.x > right.x ? receiver : right, deepestThreat);
+      const safetyMode = chooseSafetyMode(profile, nearbyVerticals.length, hasDeepHelp);
+      const selectedThreat = safetyMode === "attach-left"
+        ? leftmost
+        : safetyMode === "attach-right"
+          ? rightmost
+          : safetyMode === "jump-near"
+            ? nearbyVerticals.reduce((nearest, receiver) =>
+                Math.abs(receiver.x - state.x) < Math.abs(nearest.x - state.x)
+                  ? receiver
+                  : nearest, deepestThreat)
+            : deepestThreat;
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
+      const targetX = safetyMode === "midpoint"
+        ? splitX
+        : selectedThreat.x + ((profile.leverageNoise || 0) * .25);
+      const targetCushion = safetyMode === "midpoint"
+        ? profile.cushion
+        : safetyMode === "late"
+          ? profile.cushion * .35
+          : profile.cushion * .9;
       const lateEyes = (influence.falseStep || influence.flatFoot) && elapsed < reactionTime + .42;
-      carryingDeepThreat = !lateEyes;
-      mode = lateEyes ? "recover" : "carry";
-      state.deepThreatId = deepestThreat.id;
-      state.primaryThreatId = deepestThreat.id;
+      const lateSafety = lateEyes || safetyMode === "late";
+      carryingDeepThreat = !lateSafety;
+      mode = lateSafety ? "recover" : safetyMode === "midpoint" ? "midpoint" : "carry";
+      state.deepThreatId = selectedThreat.id;
+      state.primaryThreatId = selectedThreat.id;
       target = {
-        x: readLandmark.x + ((splitX - readLandmark.x + (profile.leverageNoise || 0)) * (hasDeepHelp ? .52 : .76)),
-        y: Math.min(deepThreatLine, deepestThreat.y - (lateEyes ? profile.cushion * .45 : profile.cushion))
+        x: readLandmark.x + ((targetX - readLandmark.x) * (
+          safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
+        )),
+        y: Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
       coverageClaims.set(
-        deepestThreat.id,
-        (coverageClaims.get(deepestThreat.id) || 0) + 1
+        selectedThreat.id,
+        (coverageClaims.get(selectedThreat.id) || 0) + 1
       );
     }
   }
   if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
-    const closeThreats = threats.filter(threat =>
-      threats[0].threatScore - threat.threatScore <= 34 + ((profile.mistakeRate || 0) * 28)
-    );
-    const shouldVaryChoice = closeThreats.length > 1
-      && (influence.wrongChoice || (profile.choiceNoise || 0) < .46);
-    const primary = shouldVaryChoice
-      ? closeThreats[Math.floor((profile.choiceNoise || 0) * 997) % closeThreats.length]
-      : threats[0];
+    const primary = committedThreat(threats, state, profile, influence, elapsed, 34) || threats[0];
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
-      mode = "midpoint";
+      const attach = profile.safetyChoice > .42 && threats.length > 1;
+      mode = attach ? "carry" : "midpoint";
       target = {
-        x: readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
+        x: attach
+          ? primary.x + ((profile.leverageNoise || 0) * .2)
+          : readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
         y: Math.min(deepThreatLine, primary.y - profile.cushion)
       };
     } else {
@@ -6880,7 +6948,8 @@ function previewMovement(scope) {
               `${defensiveRepId}-${id}`
             ),
             primaryThreatId: null,
-            deepThreatId: null
+            deepThreatId: null,
+            commitUntil: 0
           }
         };
       })
