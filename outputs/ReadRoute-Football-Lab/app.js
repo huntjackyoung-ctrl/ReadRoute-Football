@@ -6230,28 +6230,84 @@ function clampToZone(point, zone) {
   };
 }
 
-function receiverThreatScore(receiver, zone, state, isDeepSafety, hasDeepHelp, claimCount = 0) {
+function createDefenderAiProfile(start, zone, manTarget = null) {
+  const radii = zone ? zoneRadii(zone) : { x: 130, y: 130 };
+  const deepPlayer = start.y < lineOfScrimmage - 190
+    || (zone && zone.y < lineOfScrimmage - Math.max(155, radii.y * .75));
+  const flatZone = zone && zone.y > lineOfScrimmage - 110;
+  return {
+    reaction: (deepPlayer ? .28 : flatZone ? .14 : .19) + (Math.random() * .12),
+    aggressiveness: .42 + (Math.random() * .36),
+    matchTendency: .48 + (Math.random() * .36),
+    flatRally: flatZone ? .42 + (Math.random() * .42) : .25 + (Math.random() * .28),
+    patience: deepPlayer ? .74 + (Math.random() * .18) : .46 + (Math.random() * .3),
+    cushion: deepPlayer ? 34 + (Math.random() * 16) : 12 + (Math.random() * 10),
+    manTarget
+  };
+}
+
+function zoneStyle(zone, state) {
+  const radii = zoneRadii(zone);
+  const isDeepSafety = state.start.y < lineOfScrimmage - 190
+    || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75);
+  const isFlatDefender = zone.y > lineOfScrimmage - 110;
+  const isWideZone = zone.x < fieldWidth * .34
+    || zone.x > fieldWidth * .66
+    || radii.x > radii.y * 1.18;
+  return {
+    radii,
+    isDeepSafety,
+    isFlatDefender,
+    isWideZone,
+    isCurlFlat: isWideZone && !isDeepSafety,
+    isHook: !isDeepSafety && !isWideZone
+  };
+}
+
+function receiverRouteRead(receiver) {
+  const verticalSpeed = Math.max(0, -receiver.vy);
+  const routeDepth = Math.max(0, lineOfScrimmage - receiver.y);
+  const lateralSpeed = Math.abs(receiver.vx);
+  return {
+    routeDepth,
+    verticalSpeed,
+    isVertical: receiver.vy < -24 || (routeDepth > 34 && receiver.vy < 12),
+    isFlat: receiver.y > lineOfScrimmage - 125 && lateralSpeed > Math.max(22, verticalSpeed * .75),
+    isCrosser: lateralSpeed > Math.max(30, Math.abs(receiver.vy) * 1.08),
+    isComingBack: receiver.vy > 24
+  };
+}
+
+function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0) {
   const radii = zoneRadii(zone);
   const projected = {
     x: receiver.x + (receiver.vx * .16),
     y: receiver.y + (receiver.vy * .16)
   };
   const distance = zoneDistance(projected, zone);
-  const verticalSpeed = Math.max(0, -receiver.vy);
-  const routeDepth = Math.max(0, lineOfScrimmage - receiver.y);
+  const read = receiverRouteRead(receiver);
   const movingIntoZone = receiver.zoneDistancePrevious - distance;
+  const profile = state.profile || {};
   let score = (1.45 - Math.min(1.45, distance)) * 80;
   score += Math.min(30, Math.max(-12, movingIntoZone * 125));
-  score += Math.min(24, verticalSpeed * .16);
-  if (isDeepSafety) {
-    score += Math.min(55, routeDepth * .16);
-    score += receiver.y < state.y + 70 ? 34 : 0;
-    score -= receiver.vy > 28 ? 24 : 0;
+  score += Math.min(24, read.verticalSpeed * .16);
+  if (style.isDeepSafety) {
+    score += Math.min(58, read.routeDepth * .18);
+    score += read.isVertical ? 28 : 0;
+    score += receiver.y < state.y + 70 ? 30 : 0;
+    score -= read.isComingBack ? 38 * (profile.patience || .7) : 0;
+    score -= read.isFlat ? 26 : 0;
+  } else if (style.isFlatDefender || style.isCurlFlat) {
+    score += read.isFlat ? 34 * (profile.flatRally || .5) : 0;
+    score += read.isCrosser ? 12 : 0;
+    score += !hasDeepHelp && read.isVertical ? 18 * (profile.matchTendency || .6) : 0;
+    score -= hasDeepHelp && read.routeDepth > 135 ? 18 : 0;
   } else {
     score += receiver.y >= zone.y - radii.y * .8 ? 14 : 0;
-    score += !hasDeepHelp && receiver.vy < -30 ? 8 : 0;
+    score += read.isCrosser ? 18 : 0;
+    score += !hasDeepHelp && read.isVertical ? 12 : 0;
   }
-  score -= claimCount * (isDeepSafety ? 8 : 28);
+  score -= claimCount * (style.isDeepSafety ? 8 : 28);
   if (state.primaryThreatId === receiver.id) score += 18;
   return score;
 }
@@ -6266,11 +6322,11 @@ function moveZoneDefender(
   coverageClaims = new Map()
 ) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
-  const radii = zoneRadii(zone);
-  const isDeepSafety = state.start.y < lineOfScrimmage - 190
-    || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75);
-  const isFlatDefender = zone.y > lineOfScrimmage - 105;
-  const reactionTime = isDeepSafety ? .3 : isFlatDefender ? .16 : .21;
+  const style = zoneStyle(zone, state);
+  const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
+  const profile = state.profile || createDefenderAiProfile(state.start, zone);
+  state.profile = profile;
+  const reactionTime = profile.reaction;
   const deepThreatLine = Math.max(
     state.start.y,
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
@@ -6279,11 +6335,12 @@ function moveZoneDefender(
     .map(receiver => ({
       ...receiver,
       zoneDistance: zoneDistance(receiver, zone),
+      read: receiverRouteRead(receiver),
       threatScore: receiverThreatScore(
         receiver,
         zone,
         state,
-        isDeepSafety,
+        style,
         hasDeepHelp,
         coverageClaims.get(receiver.id) || 0
       )
@@ -6292,6 +6349,7 @@ function moveZoneDefender(
     .sort((a, b) => b.threatScore - a.threatScore);
 
   let target = { ...state.start };
+  let mode = "spot";
   let carryingDeepThreat = false;
   if (elapsed > .55 && !threats.length) {
     target = {
@@ -6320,11 +6378,12 @@ function moveZoneDefender(
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
       carryingDeepThreat = true;
+      mode = "carry";
       state.deepThreatId = deepestThreat.id;
       state.primaryThreatId = deepestThreat.id;
       target = {
-        x: zone.x + ((splitX - zone.x) * (hasDeepHelp ? .58 : .78)),
-        y: Math.min(deepThreatLine, deepestThreat.y - (hasDeepHelp ? 22 : 32))
+        x: zone.x + ((splitX - zone.x) * (hasDeepHelp ? .52 : .76)),
+        y: Math.min(deepThreatLine, deepestThreat.y - profile.cushion)
       };
       coverageClaims.set(
         deepestThreat.id,
@@ -6337,32 +6396,80 @@ function moveZoneDefender(
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
+      mode = "midpoint";
       target = {
-        x: zone.x + ((primary.x - zone.x) * .62),
-        y: Math.min(deepThreatLine, primary.y - 30)
+        x: zone.x + ((primary.x - zone.x) * .48),
+        y: Math.min(deepThreatLine, primary.y - profile.cushion)
       };
     } else {
-      const routeBreakingOut = Math.abs(primary.vx) > Math.abs(primary.vy) * 1.05;
-      const routeBreakingDown = primary.vy > 22;
-      const driveFactor = routeBreakingOut || routeBreakingDown ? .9 : .68;
-      const depthLeverage = primary.vy < -22 && !hasDeepHelp ? 18 : 8;
-      target = {
-        x: zone.x + ((primary.x - zone.x) * driveFactor),
-        y: primary.y - depthLeverage
-      };
+      const shouldRallyFlat = (isFlatDefender || isCurlFlat)
+        && primary.read.isFlat
+        && (primary.zoneDistance < 1.08 || profile.flatRally > .56);
+      const shouldCarryVertical = primary.read.isVertical
+        && (!hasDeepHelp || profile.matchTendency > .62)
+        && primary.y < zone.y + radii.y * .28;
+      const shouldWallCrosser = isHook && primary.read.isCrosser;
+      if (shouldCarryVertical) {
+        mode = "carry";
+        target = {
+          x: zone.x + ((primary.x - zone.x) * (hasDeepHelp ? .42 : .62)),
+          y: hasDeepHelp
+            ? Math.max(zone.y - radii.y * .45, primary.y + 18)
+            : Math.min(deepThreatLine + 40, primary.y - 10)
+        };
+      } else if (shouldRallyFlat) {
+        mode = "rally";
+        const outsideLeverage = primary.x < zone.x ? 18 : -18;
+        target = {
+          x: primary.x + outsideLeverage,
+          y: primary.y - 6
+        };
+      } else if (shouldWallCrosser) {
+        mode = "wall";
+        target = {
+          x: zone.x + ((primary.x - zone.x) * .58),
+          y: Math.min(zone.y + radii.y * .22, primary.y - 10)
+        };
+      } else {
+        mode = "spot";
+        const lean = .22 + ((profile.aggressiveness || .5) * .18);
+        target = {
+          x: zone.x + ((primary.x - zone.x) * lean),
+          y: zone.y + ((primary.y - zone.y) * Math.min(.28, lean))
+        };
+      }
     }
   } else if (!threats.length && state.primaryThreatId) {
     state.primaryThreatId = null;
   }
-  if (!carryingDeepThreat) target = clampToZone(target, zone);
+  if (!carryingDeepThreat && mode !== "carry" && mode !== "rally") target = clampToZone(target, zone);
+  if (isDeepSafety) {
+    target.y = Math.min(target.y, deepThreatLine);
+  } else if (mode !== "carry" && mode !== "rally") {
+    target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
+  }
 
   const gapX = target.x - state.x;
   const gapY = target.y - state.y;
   const separation = Math.hypot(gapX, gapY);
-  const maxSpeed = carryingDeepThreat ? 136 : isDeepSafety ? 84 : isFlatDefender ? 106 : 96;
+  const speedBoost = .86 + ((profile.aggressiveness || .5) * .32);
+  const maxSpeed = (
+    mode === "carry" ? 134
+      : mode === "rally" ? 120
+        : mode === "wall" ? 104
+          : isDeepSafety ? 72
+            : isFlatDefender ? 92
+              : 86
+  ) * speedBoost;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
-  const acceleration = carryingDeepThreat ? 760 : isDeepSafety ? 410 : isFlatDefender ? 560 : 480;
+  const acceleration = (
+    mode === "carry" ? 650
+      : mode === "rally" ? 540
+        : mode === "wall" ? 500
+          : isDeepSafety ? 320
+            : 420
+  ) * speedBoost;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
@@ -6386,6 +6493,7 @@ function moveZoneDefender(
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
   }
+  state.lastMode = mode;
   return { x: state.x, y: state.y };
 }
 
@@ -6483,6 +6591,7 @@ function previewMovement(scope) {
             vx: 0,
             vy: 0,
             start: zoneStart,
+            profile: createDefenderAiProfile(zoneStart, zoneAssignment, manTarget),
             primaryThreatId: null,
             deepThreatId: null
           }
@@ -6503,7 +6612,7 @@ function previewMovement(scope) {
     0,
     ...offensePaths.map(path => pathDuration(path.snapStart, path.route, baseSpeed)),
     ...defensePaths.map(path =>
-      path.routeDuration + (path.zoneAssignment && !path.manTarget ? 3 : 0)
+      path.routeDuration + (path.zoneAssignment && !path.manTarget ? 5 : 0)
     )
   );
   const totalDuration = maxMotionDuration + maxPostSnapDuration;
