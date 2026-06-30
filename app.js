@@ -6346,7 +6346,7 @@ function clampToZone(point, zone) {
   };
 }
 
-function createDefenderAiProfile(start, zone, manTarget = null, realism = defaultDefenseRealism()) {
+function createDefenderAiProfile(start, zone, manTarget = null, realism = defaultDefenseRealism(), repId = "") {
   const settings = normalizeDefenseRealism(realism);
   const radii = zone ? zoneRadii(zone) : { x: 130, y: 130 };
   const deepPlayer = start.y < lineOfScrimmage - 190
@@ -6374,10 +6374,12 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     mistakeRate: Math.max(0, Math.min(1, mistakes + disciplinePenalty - (awareness * .18))),
     eyes: settings.eyes,
     personality,
+    repId,
     falseStep: Math.random(),
     runBite: Math.random(),
     overCarry: Math.random(),
     jumpShort: Math.random(),
+    settleNoise: Math.random(),
     manTarget
   };
 }
@@ -6485,6 +6487,7 @@ function moveZoneDefender(
   const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
   const profile = state.profile || createDefenderAiProfile(state.start, zone);
   state.profile = profile;
+  state.repId ||= profile.repId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const influence = playInfluence(playIntent, profile);
   const reactionTime = profile.reaction + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0);
   const deepThreatLine = Math.max(
@@ -6728,6 +6731,7 @@ function previewMovement(scope) {
   stopAnimationPlayback();
   animationState = { offense: {}, defense: {} };
   const startedAt = performance.now();
+  const defensiveRepId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const baseSpeed = 115;
   const playbackScale = scope === "run" || scope === "test" ? runSpeed : 1;
   const animateOffense = scope === "run" || scope === "test" || scope === "play";
@@ -6800,7 +6804,13 @@ function previewMovement(scope) {
             vx: 0,
             vy: 0,
             start: zoneStart,
-            profile: createDefenderAiProfile(zoneStart, zoneAssignment, manTarget, activeDefenseRealism),
+            profile: createDefenderAiProfile(
+              zoneStart,
+              zoneAssignment,
+              manTarget,
+              activeDefenseRealism,
+              `${defensiveRepId}-${id}`
+            ),
             primaryThreatId: null,
             deepThreatId: null
           }
