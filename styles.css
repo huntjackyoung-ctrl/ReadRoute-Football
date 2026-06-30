@@ -1869,7 +1869,7 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
 .defense-label-heading,
 .defense-label-row {
   display: grid;
-  grid-template-columns: 1fr 74px;
+  grid-template-columns: 1fr 64px 98px;
   gap: 8px;
   align-items: center;
 }
@@ -1892,6 +1892,11 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   font-size: 10px;
   font-weight: 900;
   text-transform: uppercase;
+}
+.defense-technique-select {
+  padding: 7px 5px;
+  font-size: 9px;
+  font-weight: 850;
 }
 .defense-assignment-label {
   grid-column: 1 / -1;

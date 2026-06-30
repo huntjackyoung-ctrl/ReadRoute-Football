@@ -155,6 +155,24 @@ function defaultDefenseRealism() {
   };
 }
 
+function defaultDefenderTechnique() {
+  return "balanced";
+}
+
+function normalizeDefenderTechnique(value) {
+  const allowed = ["balanced", "keepDepth", "midpoint", "matchVertical", "jumpFirst", "robInside", "wallCrosser"];
+  return allowed.includes(value) ? value : defaultDefenderTechnique();
+}
+
+function normalizeDefenderTechniques(techniques = {}) {
+  return Object.fromEntries(
+    Object.entries(techniques || {}).map(([id, technique]) => [
+      id,
+      normalizeDefenderTechnique(technique)
+    ])
+  );
+}
+
 function normalizePercent(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(0, Math.min(100, number)) : fallback;
@@ -198,6 +216,7 @@ function createBlankDefense(name = "Untitled Defense", labels = {}) {
     routes: {},
     manAssignments: {},
     zoneAssignments: {},
+    techniques: {},
     formationAlignments: {},
     labels: structuredClone(labels),
     notes: []
@@ -582,6 +601,7 @@ function normalizeDefense(defense) {
     positions: { ...defaultDefensePositions(), ...(defense.positions || {}) },
     routes: defense.routes || {},
     manAssignments: defense.manAssignments || {},
+    techniques: normalizeDefenderTechniques(defense.techniques),
     zoneAssignments: Object.fromEntries(
       Object.entries(defense.zoneAssignments || {}).map(([id, assignment]) => {
         const legacyRadius = Number(assignment?.radius) || 130;
@@ -622,6 +642,7 @@ function loadDefenses() {
     routes: structuredClone(source.legacyDefenseRoutes?.[source.legacyCoverageId] || {}),
     manAssignments: {},
     zoneAssignments: {},
+    techniques: {},
     formationAlignments: {},
     realism: defaultDefenseRealism(),
     labels: {},
@@ -853,6 +874,7 @@ function createRunScenario() {
     defenseRoutes: structuredClone(currentDefense().routes),
     manAssignments: structuredClone(currentDefense().manAssignments || {}),
     zoneAssignments: structuredClone(currentDefense().zoneAssignments || {}),
+    techniques: structuredClone(currentDefense().techniques || {}),
     playIntent: normalizePlayIntent(currentPlay().intent),
     defenseRealism: normalizeDefenseRealism(currentDefense().realism)
   };
@@ -888,6 +910,15 @@ function currentZoneAssignments() {
   }
   currentDefense().zoneAssignments ||= {};
   return currentDefense().zoneAssignments;
+}
+
+function currentDefenderTechniques() {
+  if (isRunLikeMode()) {
+    if (!runScenario) resetRunScenario();
+    return runScenario.techniques ||= {};
+  }
+  currentDefense().techniques ||= {};
+  return currentDefense().techniques;
 }
 
 function assignMan(defenderId, offenseId) {
@@ -4201,6 +4232,27 @@ function defender(x, y, label = "") {
       saveDefenses();
     });
     row.append(input);
+    const technique = document.createElement("select");
+    technique.className = "defense-technique-select";
+    technique.setAttribute("aria-label", `${id} defensive technique`);
+    technique.innerHTML = [
+      ["balanced", "Balanced"],
+      ["keepDepth", "Keep depth"],
+      ["midpoint", "Midpoint"],
+      ["matchVertical", "Match vertical"],
+      ["jumpFirst", "Jump first"],
+      ["robInside", "Rob inside"],
+      ["wallCrosser", "Wall crosser"]
+    ].map(([value, name]) =>
+      `<option value="${value}">${name}</option>`
+    ).join("");
+    technique.value = normalizeDefenderTechnique(currentDefense().techniques?.[id]);
+    technique.addEventListener("change", event => {
+      currentDefense().techniques ||= {};
+      currentDefense().techniques[id] = normalizeDefenderTechnique(event.target.value);
+      saveDefenses();
+    });
+    row.append(technique);
     const assignment = document.createElement("small");
     assignment.className = "defense-assignment-label";
     assignment.textContent = manTarget
@@ -6210,9 +6262,73 @@ function safeVelocity(distance, deltaSeconds) {
   return distance / safeDelta;
 }
 
+function initializeBodyState(posture = "shuffle") {
+  return {
+    posture,
+    hips: "square",
+    turnDelay: 0,
+    momentum: { x: 0, y: 0 }
+  };
+}
+
+function bodyPostureForMode(mode, gapX, gapY, isDeepSafety = false) {
+  if (mode === "recover") return "recover";
+  if (mode === "carry") return "open";
+  if (mode === "rally" || mode === "run-fit" || mode === "bite") return "drive";
+  if (mode === "wall") return "shuffle";
+  if (isDeepSafety || mode === "midpoint") return "backpedal";
+  if (Math.abs(gapX) > Math.abs(gapY) * 1.15) return "shuffle";
+  if (gapY < -8) return "backpedal";
+  return "shuffle";
+}
+
+function bodyMovementProfile(body, nextPosture, gapX, gapY, safeDelta) {
+  body.posture ||= nextPosture;
+  body.hips ||= "square";
+  body.turnDelay ||= 0;
+  const changingToOpen = body.posture !== "open" && nextPosture === "open";
+  const changingDirection = Math.sign(gapX || 0) && body.hips !== "square"
+    && body.hips !== (gapX < 0 ? "left" : "right");
+  if (changingToOpen || changingDirection) {
+    body.turnDelay = Math.max(body.turnDelay || 0, changingToOpen ? .12 : .08);
+  }
+  if (body.turnDelay > 0) body.turnDelay = Math.max(0, body.turnDelay - safeDelta);
+  body.posture = nextPosture;
+  if (nextPosture === "open" || nextPosture === "recover") {
+    body.hips = gapX < -8 ? "left" : gapX > 8 ? "right" : body.hips;
+  } else if (nextPosture === "backpedal" || nextPosture === "shuffle") {
+    body.hips = "square";
+  }
+  const multipliers = {
+    backpedal: { speed: .68, accel: .62 },
+    shuffle: { speed: .72, accel: .7 },
+    open: { speed: 1, accel: .88 },
+    drive: { speed: .9, accel: 1 },
+    recover: { speed: 1.08, accel: .92 }
+  };
+  const base = multipliers[nextPosture] || multipliers.shuffle;
+  const turnPenalty = body.turnDelay > 0 ? .58 : 1;
+  return {
+    speed: base.speed * turnPenalty,
+    accel: base.accel * turnPenalty
+  };
+}
+
+function trafficSlowdown(point, receivers, defenderId = "") {
+  let slowdown = 1;
+  receivers.forEach(receiver => {
+    if (receiver.id === defenderId) return;
+    const distance = Math.hypot(receiver.x - point.x, receiver.y - point.y);
+    if (distance < 26) slowdown = Math.min(slowdown, .62);
+    else if (distance < 42) slowdown = Math.min(slowdown, .78);
+  });
+  return slowdown;
+}
+
 function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
   const profile = state.profile || {};
+  state.body ||= initializeBodyState("shuffle");
   const reactionVariance = profile.reaction ? profile.reaction * .35 : 0;
   const reactionTime = (state.initialCushion < 55 ? 0.09 : 0.14)
     + reactionVariance
@@ -6318,10 +6434,16 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const gapX = targetX - state.x;
   const gapY = targetY - state.y;
   const separation = Math.hypot(gapX, gapY);
-  const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
-  const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
+  const nextPosture = state.phase === "carry"
+    ? "open"
+    : state.phase === "drive"
+      ? "drive"
+      : "shuffle";
+  const bodyProfile = bodyMovementProfile(state.body, nextPosture, gapX, gapY, safeDelta);
+  const desiredVx = separation ? (gapX / separation) * maxSpeed * bodyProfile.speed : 0;
+  const desiredVy = separation ? (gapY / separation) * maxSpeed * bodyProfile.speed : 0;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
-  const maxVelocityChange = acceleration * safeDelta;
+  const maxVelocityChange = acceleration * bodyProfile.accel * safeDelta;
   const velocityRatio = velocityChange
     ? Math.min(1, maxVelocityChange / velocityChange)
     : 0;
@@ -6425,8 +6547,10 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
   };
 }
 
-function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp) {
+function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp, technique = "balanced") {
   if (verticalThreatCount < 2) return "attach";
+  if (technique === "keepDepth" || technique === "midpoint") return "midpoint";
+  if (technique === "matchVertical") return profile.safetyChoice < .5 ? "attach-left" : "attach-right";
   const roll = profile.safetyModeRoll || 0;
   const mistakeRate = profile.mistakeRate || 0;
   const discipline = profile.discipline || .7;
@@ -6505,6 +6629,25 @@ function receiverRouteRead(receiver) {
   };
 }
 
+function confirmedReceiverRead(receiver, state, safeDelta) {
+  state.receiverReads ||= {};
+  const read = receiver.read || receiverRouteRead(receiver);
+  const saved = state.receiverReads[receiver.id] ||= {
+    crosser: 0,
+    comingBack: 0,
+    vertical: 0
+  };
+  saved.crosser = Math.max(0, saved.crosser + (read.isCrosser ? safeDelta : -safeDelta * 1.5));
+  saved.comingBack = Math.max(0, saved.comingBack + (read.isComingBack ? safeDelta : -safeDelta * 1.5));
+  saved.vertical = Math.max(0, saved.vertical + (read.isVertical ? safeDelta : -safeDelta));
+  return {
+    ...read,
+    isCrosser: saved.crosser > .12,
+    isComingBack: saved.comingBack > .1,
+    isVertical: saved.vertical > .06 || read.routeDepth > 55
+  };
+}
+
 function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0, receiverIndex = 0) {
   const radii = zoneRadii(zone);
   const projected = {
@@ -6512,9 +6655,10 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     y: receiver.y + (receiver.vy * .16)
   };
   const distance = zoneDistance(projected, zone);
-  const read = receiverRouteRead(receiver);
+  const read = receiver.read || receiverRouteRead(receiver);
   const movingIntoZone = receiver.zoneDistancePrevious - distance;
   const profile = state.profile || {};
+  const technique = normalizeDefenderTechnique(state.technique);
   let score = (1.45 - Math.min(1.45, distance)) * 80;
   score += Math.min(30, Math.max(-12, movingIntoZone * 125));
   score += Math.min(24, read.verticalSpeed * .16);
@@ -6533,6 +6677,22 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     score += receiver.y >= zone.y - radii.y * .8 ? 14 : 0;
     score += read.isCrosser ? 18 : 0;
     score += !hasDeepHelp && read.isVertical ? 12 : 0;
+  }
+  if (technique === "keepDepth") {
+    score += read.isVertical ? 22 : 0;
+    score -= read.isComingBack || read.isFlat ? 24 : 0;
+  } else if (technique === "midpoint") {
+    score += read.isVertical ? 12 : 0;
+    score -= read.isComingBack ? 12 : 0;
+  } else if (technique === "matchVertical") {
+    score += read.isVertical ? 34 : 0;
+  } else if (technique === "jumpFirst") {
+    score += receiver.zoneDistance < 1 ? 22 : 0;
+    score += read.isFlat || read.isComingBack ? 16 : 0;
+  } else if (technique === "robInside") {
+    score += read.isCrosser && Math.abs(receiver.x - zone.x) < radii.x * .85 ? 30 : 0;
+  } else if (technique === "wallCrosser") {
+    score += read.isCrosser ? 34 : 0;
   }
   score -= claimCount * (style.isDeepSafety ? 8 : 28);
   if (state.primaryThreatId === receiver.id) score += 8 + ((profile.discipline || .7) * 8);
@@ -6561,7 +6721,9 @@ function moveZoneDefender(
   const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
   const profile = state.profile || createDefenderAiProfile(state.start, zone);
   state.profile = profile;
+  state.body ||= initializeBodyState(isDeepSafety ? "backpedal" : "shuffle");
   state.repId ||= profile.repId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const technique = normalizeDefenderTechnique(state.technique);
   const influence = playInfluence(playIntent, profile);
   const readLandmark = {
     x: zone.x + (profile.landmarkX || 0),
@@ -6575,20 +6737,26 @@ function moveZoneDefender(
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
   );
   const threats = receivers
-    .map((receiver, receiverIndex) => ({
-      ...receiver,
-      zoneDistance: zoneDistance(receiver, zone),
-      read: receiverRouteRead(receiver),
-      threatScore: receiverThreatScore(
-        receiver,
-        zone,
-        state,
-        style,
-        hasDeepHelp,
-        coverageClaims.get(receiver.id) || 0,
-        receiverIndex
-      )
-    }))
+    .map((receiver, receiverIndex) => {
+      const read = confirmedReceiverRead(receiver, state, safeDelta);
+      const enriched = {
+        ...receiver,
+        zoneDistance: zoneDistance(receiver, zone),
+        read
+      };
+      return {
+        ...enriched,
+        threatScore: receiverThreatScore(
+          enriched,
+          zone,
+          state,
+          style,
+          hasDeepHelp,
+          coverageClaims.get(receiver.id) || 0,
+          receiverIndex
+        )
+      };
+    })
     .filter(receiver => receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28))
     .sort((a, b) => b.threatScore - a.threatScore);
 
@@ -6641,7 +6809,7 @@ function moveZoneDefender(
         receiver.x < left.x ? receiver : left, deepestThreat);
       const rightmost = nearbyVerticals.reduce((right, receiver) =>
         receiver.x > right.x ? receiver : right, deepestThreat);
-      const safetyMode = chooseSafetyMode(profile, nearbyVerticals.length, hasDeepHelp);
+      const safetyMode = chooseSafetyMode(profile, nearbyVerticals.length, hasDeepHelp, technique);
       const selectedThreat = safetyMode === "attach-left"
         ? leftmost
         : safetyMode === "attach-right"
@@ -6663,17 +6831,24 @@ function moveZoneDefender(
         : safetyMode === "late"
           ? profile.cushion * .35
           : profile.cushion * .9;
-      const lateEyes = (influence.falseStep || influence.flatFoot) && elapsed < reactionTime + .42;
-      const lateSafety = lateEyes || safetyMode === "late";
+      const downhillMistake = influence.falseStep && elapsed < reactionTime + .42;
+      const frozenEyes = influence.flatFoot && elapsed < reactionTime + .42;
+      const lateSafety = downhillMistake || frozenEyes || safetyMode === "late";
       carryingDeepThreat = !lateSafety;
-      mode = lateSafety ? "recover" : safetyMode === "midpoint" ? "midpoint" : "carry";
+      mode = downhillMistake || safetyMode === "late"
+        ? "recover"
+        : safetyMode === "midpoint" || frozenEyes
+          ? "midpoint"
+          : "carry";
       state.deepThreatId = selectedThreat.id;
       state.primaryThreatId = selectedThreat.id;
       target = {
         x: readLandmark.x + ((targetX - readLandmark.x) * (
           safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
         )),
-        y: Math.min(deepThreatLine, selectedThreat.y - targetCushion)
+        y: safetyMode === "midpoint" || frozenEyes
+          ? Math.min(state.start.y, deepThreatLine)
+          : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
       coverageClaims.set(
         selectedThreat.id,
@@ -6686,28 +6861,40 @@ function moveZoneDefender(
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
-      const attach = profile.safetyChoice > .42 && threats.length > 1;
+      const attach = technique === "matchVertical"
+        || (technique !== "keepDepth" && technique !== "midpoint" && profile.safetyChoice > .42 && threats.length > 1);
       mode = attach ? "carry" : "midpoint";
       target = {
         x: attach
           ? primary.x + ((profile.leverageNoise || 0) * .2)
           : readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
-        y: Math.min(deepThreatLine, primary.y - profile.cushion)
+        y: attach
+          ? Math.min(deepThreatLine, primary.y - profile.cushion)
+          : Math.min(state.start.y, deepThreatLine)
       };
     } else {
       const shouldRallyFlat = (isFlatDefender || isCurlFlat)
         && primary.read.isFlat
-        && (primary.zoneDistance < 1.08 || profile.flatRally > .56 || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
+        && technique !== "keepDepth"
+        && technique !== "matchVertical"
+        && (primary.zoneDistance < 1.08 || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
       const shouldCarryVertical = primary.read.isVertical
-        && (!hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
+        && (technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
         && primary.y < readLandmark.y + radii.y * .28;
-      const shouldWallCrosser = isHook && primary.read.isCrosser;
+      const shouldWallCrosser = (isHook || technique === "wallCrosser" || technique === "robInside")
+        && primary.read.isCrosser;
+      const passOffVertical = hasDeepHelp
+        && technique !== "matchVertical"
+        && primary.read.routeDepth > 120
+        && primary.y < readLandmark.y - radii.y * .45;
       const overCarryMistake = shouldCarryVertical && hasDeepHelp && profile.overCarry < profile.mistakeRate + .16;
       if (shouldCarryVertical) {
         mode = "carry";
         target = {
-          x: zone.x + ((primary.x - zone.x) * (overCarryMistake ? .78 : hasDeepHelp ? .42 : .62)),
-          y: hasDeepHelp && !overCarryMistake
+          x: zone.x + ((primary.x - zone.x) * (overCarryMistake || technique === "matchVertical" ? .78 : hasDeepHelp ? .42 : .62)),
+          y: passOffVertical
+            ? Math.max(readLandmark.y - radii.y * .25, primary.y + 26)
+            : hasDeepHelp && !overCarryMistake
             ? Math.max(readLandmark.y - radii.y * .45, primary.y + 18)
             : Math.min(deepThreatLine + 40, primary.y - 10)
         };
@@ -6739,6 +6926,7 @@ function moveZoneDefender(
   if (!carryingDeepThreat && mode !== "carry" && mode !== "rally") target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
+    if (mode === "midpoint") target.y = Math.min(target.y, state.start.y);
   } else if (mode !== "carry" && mode !== "rally" && mode !== "run-fit") {
     target.x = Math.max(zone.x - radii.x * .82, Math.min(zone.x + radii.x * .82, target.x));
     target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
@@ -6757,6 +6945,9 @@ function moveZoneDefender(
     return { x: state.x, y: state.y };
   }
   const speedBoost = .86 + ((profile.aggressiveness || .5) * .32);
+  const nextPosture = bodyPostureForMode(mode, gapX, gapY, isDeepSafety);
+  const bodyProfile = bodyMovementProfile(state.body, nextPosture, gapX, gapY, safeDelta);
+  const traffic = trafficSlowdown(state, receivers);
   const movementMultiplier = mode === "carry" || mode === "recover"
     ? 1
     : mode === "run-fit"
@@ -6775,7 +6966,7 @@ function moveZoneDefender(
           : isDeepSafety ? 72
             : isFlatDefender ? 92
               : 86
-  ) * speedBoost * movementMultiplier;
+  ) * speedBoost * movementMultiplier * bodyProfile.speed * traffic;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
   const acceleration = (
@@ -6786,7 +6977,7 @@ function moveZoneDefender(
         : mode === "wall" ? 500
           : isDeepSafety ? 320
             : 420
-  ) * speedBoost * movementMultiplier;
+  ) * speedBoost * movementMultiplier * bodyProfile.accel * traffic;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
@@ -6882,6 +7073,7 @@ function previewMovement(scope) {
         const manTarget = currentManAssignments()[id];
         const manTargetStart = editorOffensePositions()[manTarget] || start;
         const zoneAssignment = currentZoneAssignments()[id];
+        const technique = normalizeDefenderTechnique(currentDefenderTechniques()[id]);
         const repDelay = scope === "run" || scope === "test"
           ? Math.random() * .28
           : 0;
@@ -6926,6 +7118,8 @@ function previewMovement(scope) {
             },
             lastDirection: { x: 0, y: -1 },
             leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1,
+            technique,
+            body: initializeBodyState("shuffle"),
             profile: createDefenderAiProfile(
               start,
               zoneAssignment,
@@ -6940,6 +7134,8 @@ function previewMovement(scope) {
             vx: 0,
             vy: 0,
             start: zoneStart,
+            technique,
+            body: initializeBodyState(zoneStart.y < lineOfScrimmage - 190 ? "backpedal" : "shuffle"),
             profile: createDefenderAiProfile(
               zoneStart,
               zoneAssignment,
