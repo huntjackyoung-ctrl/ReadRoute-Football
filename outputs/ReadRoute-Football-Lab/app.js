@@ -6212,7 +6212,11 @@ function safeVelocity(distance, deltaSeconds) {
 
 function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
-  const reactionTime = state.initialCushion < 55 ? 0.09 : 0.14;
+  const profile = state.profile || {};
+  const reactionVariance = profile.reaction ? profile.reaction * .35 : 0;
+  const reactionTime = (state.initialCushion < 55 ? 0.09 : 0.14)
+    + reactionVariance
+    + ((profile.falseStep || 0) < (profile.mistakeRate || 0) ? .08 : 0);
   if (elapsed < reactionTime || !safeDelta) {
     state.lastReceiver = { ...receiverPosition };
     return { x: state.x, y: state.y };
@@ -6279,8 +6283,8 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
     const leverage = Math.max(-42, Math.min(42, state.horizontalLeverage));
     targetX = receiverPosition.x + leverage;
     targetY = state.start.y;
-    maxSpeed = state.initialCushion < 55 ? 104 : 92;
-    acceleration = state.initialCushion < 55 ? 560 : 450;
+    maxSpeed = (state.initialCushion < 55 ? 104 : 92) * (.92 + ((profile.aggressiveness || .5) * .16));
+    acceleration = (state.initialCushion < 55 ? 560 : 450) * (.88 + ((profile.awareness || .7) * .2));
   } else if (state.phase === "carry") {
     // Open and carry from an over-the-top position instead of chasing the receiver's hip.
     const baseCarryCushion = state.initialCushion < 55 ? 20 : 30;
@@ -6293,8 +6297,10 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
     targetY = Math.min(state.start.y, receiverPosition.y - desiredCushion);
     const receiverIsLevel = cushion < 10;
     const cushionThreatened = cushion < 24;
-    maxSpeed = receiverIsLevel ? 154 : cushionThreatened ? 140 : 122;
-    acceleration = receiverIsLevel ? 940 : cushionThreatened ? 800 : 680;
+    maxSpeed = (receiverIsLevel ? 154 : cushionThreatened ? 140 : 122)
+      * (.9 + ((profile.aggressiveness || .5) * .18));
+    acceleration = (receiverIsLevel ? 940 : cushionThreatened ? 800 : 680)
+      * (.88 + ((profile.awareness || .7) * .22));
   } else {
     // Once the receiver declares the break, plant and drive toward the upfield hip.
     const trailDistance = state.deepThreatened ? 8 : 5;
@@ -6304,8 +6310,9 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
       receiverPosition.x - state.x,
       receiverPosition.y - state.y
     );
-    maxSpeed = separationFromReceiver > 55 ? 142 : separationFromReceiver > 30 ? 128 : 116;
-    acceleration = 820;
+    maxSpeed = (separationFromReceiver > 55 ? 142 : separationFromReceiver > 30 ? 128 : 116)
+      * (.9 + ((profile.aggressiveness || .5) * .2));
+    acceleration = 820 * (.86 + ((profile.awareness || .7) * .24));
   }
 
   const gapX = targetX - state.x;
@@ -6379,7 +6386,12 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     runBite: Math.random(),
     overCarry: Math.random(),
     jumpShort: Math.random(),
+    flatFoot: Math.random(),
+    choiceNoise: Math.random(),
+    wrongChoice: Math.random(),
     settleNoise: Math.random(),
+    leverageNoise: (Math.random() - .5) * 18,
+    leanNoise: (Math.random() - .5) * .12,
     manTarget
   };
 }
@@ -6395,11 +6407,14 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
       ? .5
       : .04;
   const mistakeMultiplier = profile.mistakeRate || 0;
+  const normalEyeRisk = .08 + mistakeMultiplier * .28 + ((1 - (profile.awareness || .7)) * .18);
   return {
     backfieldRead,
     biteRisk,
     falseStep: backfieldRead && profile.falseStep < biteRisk + mistakeMultiplier * .42,
     runBite: backfieldRead && profile.runBite < biteRisk,
+    flatFoot: profile.flatFoot < normalEyeRisk,
+    wrongChoice: profile.wrongChoice < normalEyeRisk * .85,
     delayedRouteRead: backfieldRead && (intent.playAction || intent.rpo),
     rpo: intent.rpo,
     playAction: intent.playAction
@@ -6438,7 +6453,7 @@ function receiverRouteRead(receiver) {
   };
 }
 
-function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0) {
+function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0, receiverIndex = 0) {
   const radii = zoneRadii(zone);
   const projected = {
     x: receiver.x + (receiver.vx * .16),
@@ -6468,7 +6483,14 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     score += !hasDeepHelp && read.isVertical ? 12 : 0;
   }
   score -= claimCount * (style.isDeepSafety ? 8 : 28);
-  if (state.primaryThreatId === receiver.id) score += 18;
+  if (state.primaryThreatId === receiver.id) score += 8 + ((profile.discipline || .7) * 8);
+  const repNoise = Math.sin(
+    ((profile.choiceNoise || .5) * 999)
+    + (receiverIndex * 3.71)
+    + ((profile.repId || "").length * .37)
+  );
+  const noiseWindow = 8 + ((profile.mistakeRate || 0) * 22) + ((1 - (profile.awareness || .7)) * 16);
+  score += repNoise * noiseWindow;
   return score;
 }
 
@@ -6489,13 +6511,15 @@ function moveZoneDefender(
   state.profile = profile;
   state.repId ||= profile.repId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const influence = playInfluence(playIntent, profile);
-  const reactionTime = profile.reaction + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0);
+  const reactionTime = profile.reaction
+    + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0)
+    + (influence.flatFoot ? .1 + ((1 - (profile.awareness || .7)) * .14) : 0);
   const deepThreatLine = Math.max(
     state.start.y,
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
   );
   const threats = receivers
-    .map(receiver => ({
+    .map((receiver, receiverIndex) => ({
       ...receiver,
       zoneDistance: zoneDistance(receiver, zone),
       read: receiverRouteRead(receiver),
@@ -6505,7 +6529,8 @@ function moveZoneDefender(
         state,
         style,
         hasDeepHelp,
-        coverageClaims.get(receiver.id) || 0
+        coverageClaims.get(receiver.id) || 0,
+        receiverIndex
       )
     }))
     .filter(receiver => receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28))
@@ -6540,13 +6565,17 @@ function moveZoneDefender(
     };
   }
   if (!runFitBite && elapsed >= reactionTime && isDeepSafety) {
-    const verticalThreats = receivers
+    let verticalThreats = receivers
       .filter(receiver =>
         receiver.y <= deepThreatLine + 80
         && receiver.vy < 18
         && Math.abs(receiver.x - zone.x) <= radii.x * 1.65
       )
       .sort((a, b) => a.y - b.y);
+    if (influence.wrongChoice && verticalThreats.length > 1) {
+      const second = verticalThreats.find(receiver => receiver.y <= verticalThreats[0].y + 65);
+      if (second) verticalThreats = [second, ...verticalThreats.filter(receiver => receiver.id !== second.id)];
+    }
     if (verticalThreats.length) {
       const deepestThreat = verticalThreats[0];
       const nearbyVerticals = verticalThreats.filter(receiver =>
@@ -6559,13 +6588,13 @@ function moveZoneDefender(
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
-      const lateEyes = influence.falseStep && elapsed < reactionTime + .42;
+      const lateEyes = (influence.falseStep || influence.flatFoot) && elapsed < reactionTime + .42;
       carryingDeepThreat = !lateEyes;
       mode = lateEyes ? "recover" : "carry";
       state.deepThreatId = deepestThreat.id;
       state.primaryThreatId = deepestThreat.id;
       target = {
-        x: zone.x + ((splitX - zone.x) * (hasDeepHelp ? .52 : .76)),
+        x: zone.x + ((splitX - zone.x + (profile.leverageNoise || 0)) * (hasDeepHelp ? .52 : .76)),
         y: Math.min(deepThreatLine, deepestThreat.y - (lateEyes ? profile.cushion * .45 : profile.cushion))
       };
       coverageClaims.set(
@@ -6575,13 +6604,18 @@ function moveZoneDefender(
     }
   }
   if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
-    const primary = threats[0];
+    const closeThreats = threats.filter(threat =>
+      threats[0].threatScore - threat.threatScore <= 16 + ((profile.mistakeRate || 0) * 18)
+    );
+    const primary = influence.wrongChoice && closeThreats.length > 1
+      ? closeThreats[Math.min(closeThreats.length - 1, 1 + Math.floor((profile.choiceNoise || 0) * (closeThreats.length - 1)))]
+      : threats[0];
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     if (isDeepSafety) {
       mode = "midpoint";
       target = {
-        x: zone.x + ((primary.x - zone.x) * .48),
+        x: zone.x + ((primary.x - zone.x + (profile.leverageNoise || 0)) * .48),
         y: Math.min(deepThreatLine, primary.y - profile.cushion)
       };
     } else {
@@ -6603,7 +6637,7 @@ function moveZoneDefender(
         };
       } else if (shouldRallyFlat) {
         mode = "rally";
-        const outsideLeverage = primary.x < zone.x ? 18 : -18;
+        const outsideLeverage = (primary.x < zone.x ? 18 : -18) + ((profile.leverageNoise || 0) * .35);
         target = {
           x: primary.x + outsideLeverage,
           y: primary.y - 6
@@ -6616,7 +6650,7 @@ function moveZoneDefender(
         };
       } else {
         mode = "spot";
-        const lean = .22 + ((profile.aggressiveness || .5) * .18);
+        const lean = Math.max(.14, Math.min(.48, .22 + ((profile.aggressiveness || .5) * .18) + (profile.leanNoise || 0)));
         target = {
           x: zone.x + ((primary.x - zone.x) * lean),
           y: zone.y + ((primary.y - zone.y) * Math.min(.28, lean))
@@ -6752,6 +6786,11 @@ function previewMovement(scope) {
           : postSnapRoute(id, start)
       }))
     : [];
+  if (scope === "run" || scope === "test") {
+    if (!runScenario) resetRunScenario();
+    runScenario.playIntent = normalizePlayIntent(currentPlay().intent);
+    runScenario.defenseRealism = normalizeDefenseRealism(currentDefense().realism);
+  }
   const activePlayIntent = scope === "run" || scope === "test"
     ? normalizePlayIntent(runScenario?.playIntent || currentPlay().intent)
     : normalizePlayIntent(currentPlay().intent);
@@ -6796,7 +6835,14 @@ function previewMovement(scope) {
               ...manTargetStart
             },
             lastDirection: { x: 0, y: -1 },
-            leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1
+            leverage: Math.sign(start.x - (editorOffensePositions()[currentManAssignments()[id]]?.x ?? start.x)) || 1,
+            profile: createDefenderAiProfile(
+              start,
+              zoneAssignment,
+              manTarget,
+              activeDefenseRealism,
+              `${defensiveRepId}-${id}-man`
+            )
           },
           zoneState: {
             x: zoneStart.x,
