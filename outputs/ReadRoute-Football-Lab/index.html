@@ -21,7 +21,6 @@
       <button class="mode-tab" data-app-tab="run">Run Plays</button>
       <button class="mode-tab" data-app-tab="test">Test</button>
       <button class="mode-tab" data-app-tab="playbook">Playbook</button>
-      <button class="mode-tab" data-app-tab="trenches">The Trenches</button>
     </nav>
     <div class="cloud-sync">
       <span id="cloudSyncStatus">Saved on this computer</span>
@@ -51,98 +50,6 @@
     </nav>
 
     <section id="playbookLibrary" class="playbook-library" aria-label="Saved playbook"></section>
-
-    <section id="trenchesLab" class="trenches-lab" aria-label="The Trenches offensive line lab">
-      <div class="trenches-heading">
-        <div>
-          <p class="eyebrow">The Trenches</p>
-          <h2>O-line answers vs. fronts</h2>
-          <p>Pick a defensive front, draw each lineman's path, and teach the rule when contact happens.</p>
-        </div>
-        <div class="trenches-controls">
-          <button id="runTrenchesButton" class="button button-primary">Run Trenches</button>
-          <button id="resetTrenchesPlayButton" class="route-tool-button">Reset Run</button>
-        </div>
-      </div>
-
-      <div class="trenches-workspace">
-        <aside class="trenches-panel">
-          <label class="field-label" for="trenchesPlayName">Trench play</label>
-          <input id="trenchesPlayName" type="text" placeholder="Power, Counter, Inside Zone...">
-          <select id="trenchesPlaySelect"></select>
-          <div class="button-row">
-            <button id="newTrenchesPlayButton" class="route-tool-button">New Play</button>
-            <button id="saveTrenchesPlayButton" class="route-tool-button">Save Play</button>
-          </div>
-          <div class="trenches-editor-tabs" role="tablist" aria-label="Trenches editor">
-            <button id="trenchesOffenseTab" class="route-tool-button active" data-trenches-panel-tab="offense" type="button">Edit Offense</button>
-            <button id="trenchesDefenseTab" class="route-tool-button" data-trenches-panel-tab="defense" type="button">Edit Defense</button>
-            <button id="trenchesFrontTab" class="route-tool-button" data-trenches-panel-tab="front" type="button">Create Front</button>
-          </div>
-          <div id="trenchesOffensePane" class="trenches-pane active" data-trenches-pane="offense">
-            <button id="addTrenchesOffenseButton" class="route-tool-button">+ Offensive Player</button>
-            <p class="eyebrow trenches-selected-label">Selected player</p>
-            <h3 id="trenchesSelectedName">LT</h3>
-            <label class="field-label" for="trenchesSpeedSelect">Playback speed</label>
-            <select id="trenchesSpeedSelect">
-              <option value="1" selected>100%</option>
-              <option value="0.75">75%</option>
-              <option value="0.5">50%</option>
-              <option value="0.25">25%</option>
-              <option value="0.1">10%</option>
-            </select>
-            <div class="button-row">
-              <button id="undoTrenchesPointButton" class="route-tool-button">Undo Point</button>
-              <button id="clearTrenchesPathButton" class="route-tool-button">Clear Path</button>
-            </div>
-            <button id="clearTrenchesOffenseButton" class="route-tool-button danger">Clear All Offense</button>
-            <div id="trenchesAssignmentsList" class="trenches-assignment-list"></div>
-          </div>
-          <div id="trenchesDefensePane" class="trenches-pane" data-trenches-pane="defense">
-            <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
-            <select id="trenchesFrontSelect"></select>
-            <button id="addTrenchesDefenderButton" class="route-tool-button">+ Defender</button>
-            <div class="button-row">
-              <button id="undoTrenchesDefensePointButton" class="route-tool-button">Undo Point</button>
-              <button id="clearTrenchesDefensePathButton" class="route-tool-button">Clear Path</button>
-            </div>
-            <button id="clearTrenchesDefenseButton" class="route-tool-button danger">Clear All Defense</button>
-            <div class="trenches-defender-editor">
-              <p class="eyebrow">Defenders</p>
-              <div id="trenchesDefenderList"></div>
-            </div>
-          </div>
-          <div id="trenchesFrontPane" class="trenches-pane" data-trenches-pane="front">
-            <label class="field-label" for="trenchesFrontSelect">Saved fronts</label>
-            <select id="trenchesFrontSelectMirror"></select>
-            <label class="field-label" for="trenchesFrontName">Front name</label>
-            <input id="trenchesFrontName" type="text" placeholder="Mint, Bear, Over...">
-            <div class="button-row">
-              <button id="newTrenchesFrontButton" class="route-tool-button">New Front</button>
-              <button id="saveTrenchesFrontButton" class="route-tool-button">Save Front</button>
-            </div>
-            <button id="deleteTrenchesFrontButton" class="route-tool-button danger">Delete Front</button>
-            <button id="addTrenchesFrontDefenderButton" class="route-tool-button">+ Defender</button>
-            <div class="trenches-defender-editor">
-              <p class="eyebrow">Template defenders</p>
-              <div id="trenchesFrontDefenderList"></div>
-            </div>
-          </div>
-          <div class="button-row">
-            <button id="trenchesMoveButton" class="route-tool-button active">Move</button>
-            <button id="trenchesDrawButton" class="route-tool-button">Draw</button>
-          </div>
-          <button id="addTrenchesNoteButton" class="route-tool-button">+ Note</button>
-          <button id="resetTrenchesAlignmentButton" class="route-tool-button">Reset Alignment</button>
-          <button id="resetTrenchesButton" class="route-tool-button">Clear Paths</button>
-        </aside>
-
-        <div class="trenches-board-card">
-          <div id="trenchesBoard" class="trenches-board"></div>
-          <p class="field-note">Use Move to set alignments. Use Draw to select an offensive player or defender, then click the field to draw that player's movement. Click a path point to round that break.</p>
-        </div>
-      </div>
-    </section>
 
     <section class="workspace">
       <aside class="panel play-panel">
@@ -505,6 +412,7 @@
         <button id="copyWorkspaceInviteButton" type="button" class="library-action-button">Copy Link</button>
       </div>
       <div id="workspaceMemberList" class="workspace-member-list"></div>
+      <div id="workspaceActivityPanel" class="workspace-activity-panel"></div>
     </form>
   </dialog>
 

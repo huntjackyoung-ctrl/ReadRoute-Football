@@ -11,6 +11,7 @@ import {
   getDatabase,
   onValue,
   ref,
+  runTransaction,
   set,
   update
 } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-database.js";
@@ -26,6 +27,7 @@ const inviteResult = document.querySelector("#workspaceInviteResult");
 const inviteLink = document.querySelector("#workspaceInviteLink");
 const copyInviteButton = document.querySelector("#copyWorkspaceInviteButton");
 const memberList = document.querySelector("#workspaceMemberList");
+const activityPanel = document.querySelector("#workspaceActivityPanel");
 const config = window.READROUTE_FIREBASE_CONFIG;
 const workspaceStorageKey = "readroute-active-workspace";
 const cloudClientStorageKey = "readroute-cloud-client";
@@ -41,6 +43,12 @@ let pendingRemoteSnapshot = null;
 let waitingForNoteBlur = false;
 let stopRemoteListener = null;
 let stopMemberListener = null;
+let stopActivityListener = null;
+let latestMembers = {};
+let latestDailyActivity = {};
+let activityView = "day";
+let activityTimer = null;
+let lastActivityTickAt = 0;
 
 function setStatus(message) {
   if (status) status.textContent = message;
@@ -67,6 +75,79 @@ function personalWorkspaceId(uid) {
 
 function noteEditorIsActive() {
   return document.activeElement?.matches?.(".note-editor textarea");
+}
+
+function localDateKey(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function startOfWeek(date) {
+  const copy = new Date(date);
+  const day = copy.getDay() || 7;
+  copy.setHours(0, 0, 0, 0);
+  copy.setDate(copy.getDate() - day + 1);
+  return copy;
+}
+
+function weekKey(date = new Date()) {
+  return localDateKey(startOfWeek(date));
+}
+
+function displayDateLabel(key) {
+  const [year, month, day] = key.split("-").map(Number);
+  return new Date(year, month - 1, day).toLocaleDateString([], {
+    month: "short",
+    day: "numeric"
+  });
+}
+
+function recentDayKeys(count = 7) {
+  return Array.from({ length: count }, (_, index) => {
+    const date = new Date();
+    date.setDate(date.getDate() - index);
+    return localDateKey(date);
+  });
+}
+
+function recentWeekKeys(count = 6) {
+  return Array.from({ length: count }, (_, index) => {
+    const date = startOfWeek(new Date());
+    date.setDate(date.getDate() - (index * 7));
+    return localDateKey(date);
+  });
+}
+
+function formatDuration(seconds = 0) {
+  const totalMinutes = Math.round((Number(seconds) || 0) / 60);
+  if (totalMinutes < 1) return "0m";
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function dailySecondsFor(uid, dayKey) {
+  return Number(latestDailyActivity?.[dayKey]?.[uid]?.seconds) || 0;
+}
+
+function weeklySecondsFor(uid, weekStartKey) {
+  const [year, month, day] = weekStartKey.split("-").map(Number);
+  const start = new Date(year, month - 1, day);
+  return Array.from({ length: 7 }, (_, index) => {
+    const date = new Date(start);
+    date.setDate(start.getDate() + index);
+    return dailySecondsFor(uid, localDateKey(date));
+  }).reduce((total, seconds) => total + seconds, 0);
+}
+
+function latestSeenAtFor(uid) {
+  return Object.values(latestDailyActivity || {})
+    .map(day => day?.[uid]?.lastSeenAt)
+    .filter(Boolean)
+    .sort()
+    .at(-1) || "";
 }
 
 if (!config?.apiKey || !config?.databaseURL) {
@@ -100,6 +181,54 @@ if (!config?.apiKey || !config?.databaseURL) {
       if (remote) applyRemoteSnapshot(remote);
     }, { once: true });
     setStatus("Workspace update waiting until note editing is finished");
+  }
+
+  async function recordWorkspaceActivity(seconds = 0) {
+    if (!activeUser || !activeWorkspaceId || !activeRole) return;
+    const now = new Date().toISOString();
+    const dayKey = localDateKey();
+    const basePath = `workspaces/${activeWorkspaceId}/activity/daily/${dayKey}/${activeUser.uid}`;
+    try {
+      if (seconds > 0) {
+        await runTransaction(
+          ref(database, `${basePath}/seconds`),
+          current => (Number(current) || 0) + seconds
+        );
+      }
+      await update(ref(database, basePath), {
+        name: activeUser.displayName || activeUser.email || "Member",
+        email: activeUser.email || "",
+        role: activeRole,
+        lastSeenAt: now
+      });
+    } catch (error) {
+      console.warn("Workspace activity tracking failed", error);
+    }
+  }
+
+  function flushActivityTime(force = false) {
+    if (!activeUser || !activeWorkspaceId || !activeRole) return;
+    const now = Date.now();
+    const wasVisible = document.visibilityState === "visible";
+    const elapsed = lastActivityTickAt && wasVisible
+      ? Math.min(90, Math.max(0, Math.round((now - lastActivityTickAt) / 1000)))
+      : 0;
+    lastActivityTickAt = now;
+    if (elapsed > 0 || force) recordWorkspaceActivity(elapsed);
+  }
+
+  function startActivityTracking() {
+    clearInterval(activityTimer);
+    lastActivityTickAt = Date.now();
+    recordWorkspaceActivity(0);
+    activityTimer = setInterval(() => flushActivityTime(false), 30000);
+  }
+
+  function stopActivityTracking() {
+    flushActivityTime(true);
+    clearInterval(activityTimer);
+    activityTimer = null;
+    lastActivityTickAt = 0;
   }
 
   async function uploadSnapshot(snapshot = window.ReadRouteCloud?.getSnapshot()) {
@@ -199,6 +328,7 @@ if (!config?.apiKey || !config?.databaseURL) {
     window.ReadRouteCloud?.setAccessRole(activeRole);
     shareButton?.classList.toggle("hidden", activeRole !== "owner");
     setStatus(`${activeRole} workspace connected`);
+    startActivityTracking();
 
     stopRemoteListener?.();
     let receivedFirstSnapshot = false;
@@ -236,15 +366,73 @@ if (!config?.apiKey || !config?.databaseURL) {
 
   function renderMembers(members = {}) {
     if (!memberList) return;
+    const entries = Object.entries(members)
+      .sort(([, a], [, b]) =>
+        (a.name || a.email || "").localeCompare(b.name || b.email || "")
+      );
     memberList.innerHTML = `
       <p class="eyebrow">Members</p>
-      ${Object.values(members).map(member => `
+      ${entries.map(([uid, member]) => {
+        const lastSeenAt = latestSeenAtFor(uid);
+        return `
         <div class="workspace-member">
           <span>${member.name || member.email || "Member"}<br><small>${member.email || ""}</small></span>
-          <small>${member.role || "viewer"}</small>
+          <small>${member.role || "viewer"}${lastSeenAt ? `<br>Last seen ${new Date(lastSeenAt).toLocaleString()}` : ""}</small>
         </div>
-      `).join("")}
+      `;
+      }).join("")}
     `;
+  }
+
+  function renderActivityPanel() {
+    if (!activityPanel || activeRole !== "owner") return;
+    const members = Object.entries(latestMembers)
+      .sort(([, a], [, b]) =>
+        (a.name || a.email || "").localeCompare(b.name || b.email || "")
+      );
+    const periods = activityView === "week" ? recentWeekKeys(6) : recentDayKeys(7);
+    activityPanel.innerHTML = `
+      <div class="workspace-activity-heading">
+        <div>
+          <p class="eyebrow">Workspace time</p>
+          <h3>Activity</h3>
+          <p>Approximate active time while each member has the workspace open.</p>
+        </div>
+        <div class="workspace-activity-tabs">
+          <button type="button" data-activity-view="day" class="${activityView === "day" ? "active" : ""}">Day</button>
+          <button type="button" data-activity-view="week" class="${activityView === "week" ? "active" : ""}">Week</button>
+        </div>
+      </div>
+      ${members.length ? members.map(([uid, member]) => `
+        <div class="workspace-activity-member">
+          <strong>${member.name || member.email || "Member"}</strong>
+          <div class="workspace-activity-periods">
+            ${periods.map(period => {
+              const seconds = activityView === "week"
+                ? weeklySecondsFor(uid, period)
+                : dailySecondsFor(uid, period);
+              return `
+                <span>
+                  <small>${activityView === "week" ? `Week of ${displayDateLabel(period)}` : displayDateLabel(period)}</small>
+                  <b>${formatDuration(seconds)}</b>
+                </span>
+              `;
+            }).join("")}
+          </div>
+        </div>
+      `).join("") : `<p class="workspace-activity-empty">No members yet.</p>`}
+    `;
+    activityPanel.querySelectorAll("[data-activity-view]").forEach(button => {
+      button.addEventListener("click", () => {
+        activityView = button.dataset.activityView === "week" ? "week" : "day";
+        renderActivityPanel();
+      });
+    });
+  }
+
+  function renderWorkspaceOverview() {
+    renderMembers(latestMembers);
+    renderActivityPanel();
   }
 
   signInButton?.addEventListener("click", async () => {
@@ -262,9 +450,20 @@ if (!config?.apiKey || !config?.databaseURL) {
     if (!activeWorkspaceId || activeRole !== "owner") return;
     inviteResult?.classList.add("hidden");
     stopMemberListener?.();
+    stopActivityListener?.();
     stopMemberListener = onValue(
       ref(database, `workspaces/${activeWorkspaceId}/members`),
-      snapshot => renderMembers(snapshot.val() || {})
+      snapshot => {
+        latestMembers = snapshot.val() || {};
+        renderWorkspaceOverview();
+      }
+    );
+    stopActivityListener = onValue(
+      ref(database, `workspaces/${activeWorkspaceId}/activity/daily`),
+      snapshot => {
+        latestDailyActivity = snapshot.val() || {};
+        renderWorkspaceOverview();
+      }
     );
     shareDialog?.showModal();
   });
@@ -302,12 +501,27 @@ if (!config?.apiKey || !config?.databaseURL) {
     uploadTimer = setTimeout(() => uploadSnapshot(event.detail), 700);
   });
 
+  document.addEventListener("visibilitychange", () => {
+    flushActivityTime(true);
+    lastActivityTickAt = Date.now();
+  });
+
+  window.addEventListener("beforeunload", () => {
+    flushActivityTime(true);
+  });
+
   onAuthStateChanged(auth, async user => {
+    stopActivityTracking();
     activeUser = user;
     stopRemoteListener?.();
     stopRemoteListener = null;
     stopMemberListener?.();
     stopMemberListener = null;
+    stopActivityListener?.();
+    stopActivityListener = null;
+    latestMembers = {};
+    latestDailyActivity = {};
+    if (activityPanel) activityPanel.innerHTML = "";
     signInButton?.classList.toggle("hidden", Boolean(user));
     signOutButton?.classList.toggle("hidden", !user);
     shareButton?.classList.add("hidden");

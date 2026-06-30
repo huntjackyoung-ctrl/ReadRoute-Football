@@ -5239,7 +5239,6 @@ function render() {
   document.body.classList.toggle("run-view", appTab === "run");
   document.body.classList.toggle("test-view", appTab === "test");
   document.body.classList.toggle("playbook-view", appTab === "playbook");
-  document.body.classList.toggle("trenches-view", appTab === "trenches");
   document.body.classList.toggle("create-formation", appTab === "create" && createScreen === "formation");
   document.body.classList.toggle("create-play", appTab === "create" && createScreen === "play");
   document.body.classList.toggle("create-defense", appTab === "create" && createScreen === "defense");
@@ -5387,7 +5386,6 @@ function render() {
   renderRunControls();
   renderTestControls();
   renderPlaybookLibrary();
-  renderTrenches();
 }
 
 document.querySelector("#savePlayButton").addEventListener("click", () => {

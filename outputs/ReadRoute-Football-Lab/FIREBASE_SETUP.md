@@ -37,6 +37,17 @@ ReadRoute uses Firebase Authentication and Realtime Database so separate Google 
             ".write": "auth != null && (root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner' || (auth.uid === $uid && !data.exists() && newData.child('inviteCode').isString() && root.child('workspaces').child($workspaceId).child('invites').child(newData.child('inviteCode').val()).child('active').val() === true && newData.child('role').val() === root.child('workspaces').child($workspaceId).child('invites').child(newData.child('inviteCode').val()).child('role').val()))"
           }
         },
+        "activity": {
+          "daily": {
+            ".read": "auth != null && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).child('role').val() === 'owner'",
+            "$date": {
+              "$uid": {
+                ".read": "auth != null && auth.uid === $uid",
+                ".write": "auth != null && auth.uid === $uid && root.child('workspaces').child($workspaceId).child('members').child(auth.uid).exists()"
+              }
+            }
+          }
+        },
         "invites": {
           "$code": {
             ".read": "auth != null",
