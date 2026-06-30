@@ -6375,6 +6375,7 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     eyes: settings.eyes,
     personality,
     falseStep: Math.random(),
+    runBite: Math.random(),
     overCarry: Math.random(),
     jumpShort: Math.random(),
     manTarget
@@ -6387,15 +6388,16 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
     profile.eyes === "balanced" && (intent.playAction || intent.rpo)
   );
   const biteRisk = intent.playAction
-    ? .34
+    ? .5
     : intent.rpo
-      ? .22
+      ? .5
       : .04;
   const mistakeMultiplier = profile.mistakeRate || 0;
   return {
     backfieldRead,
     biteRisk,
     falseStep: backfieldRead && profile.falseStep < biteRisk + mistakeMultiplier * .42,
+    runBite: backfieldRead && profile.runBite < biteRisk,
     delayedRouteRead: backfieldRead && (intent.playAction || intent.rpo),
     rpo: intent.rpo,
     playAction: intent.playAction
@@ -6509,13 +6511,24 @@ function moveZoneDefender(
   let target = { ...state.start };
   let mode = "spot";
   let carryingDeepThreat = false;
+  const isLinebackerLevel = !isDeepSafety
+    && state.start.y > lineOfScrimmage - 190
+    && state.start.y < lineOfScrimmage - 65;
+  const runFitBite = influence.runBite && isLinebackerLevel && elapsed < reactionTime + .46;
   if (elapsed > .55 && !threats.length) {
     target = {
       x: state.start.x + ((zone.x - state.start.x) * .22),
       y: state.start.y + ((zone.y - state.start.y) * (isDeepSafety ? .08 : .2))
     };
   }
-  if (influence.falseStep && elapsed < reactionTime + .22) {
+  if (runFitBite) {
+    mode = "run-fit";
+    target = {
+      x: state.start.x + ((fieldWidth / 2 - state.start.x) * .12),
+      y: Math.min(lineOfScrimmage - 24, state.start.y + 30)
+    };
+  }
+  if (!runFitBite && influence.falseStep && elapsed < reactionTime + .22) {
     mode = "bite";
     const stepDepth = isDeepSafety ? 18 : isHook ? 14 : 9;
     target = {
@@ -6523,7 +6536,7 @@ function moveZoneDefender(
       y: Math.min(lineOfScrimmage - 20, state.start.y + stepDepth)
     };
   }
-  if (elapsed >= reactionTime && isDeepSafety) {
+  if (!runFitBite && elapsed >= reactionTime && isDeepSafety) {
     const verticalThreats = receivers
       .filter(receiver =>
         receiver.y <= deepThreatLine + 80
@@ -6558,7 +6571,7 @@ function moveZoneDefender(
       );
     }
   }
-  if (!carryingDeepThreat && elapsed >= reactionTime && threats.length) {
+  if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
     const primary = threats[0];
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
@@ -6613,33 +6626,53 @@ function moveZoneDefender(
   if (!carryingDeepThreat && mode !== "carry" && mode !== "rally") target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
-  } else if (mode !== "carry" && mode !== "rally") {
+  } else if (mode !== "carry" && mode !== "rally" && mode !== "run-fit") {
     target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
   }
 
   const gapX = target.x - state.x;
   const gapY = target.y - state.y;
   const separation = Math.hypot(gapX, gapY);
+  const settleDistance = mode === "spot" || mode === "midpoint" ? 4.5 : 2.2;
+  if (separation < settleDistance && Math.hypot(state.vx, state.vy) < 18) {
+    state.vx = 0;
+    state.vy = 0;
+    state.x += gapX * .18;
+    state.y += gapY * .18;
+    state.lastMode = "settled";
+    return { x: state.x, y: state.y };
+  }
   const speedBoost = .86 + ((profile.aggressiveness || .5) * .32);
+  const movementMultiplier = mode === "carry" || mode === "recover"
+    ? 1
+    : mode === "run-fit"
+      ? .86
+      : gapY < -8
+        ? .68
+        : Math.abs(gapX) > Math.abs(gapY) * 1.2
+          ? .72
+          : .62;
   const maxSpeed = (
     mode === "carry" ? 134
       : mode === "recover" ? 150
+      : mode === "run-fit" ? 108
       : mode === "rally" ? 120
         : mode === "wall" ? 104
           : isDeepSafety ? 72
             : isFlatDefender ? 92
               : 86
-  ) * speedBoost;
+  ) * speedBoost * movementMultiplier;
   const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
   const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
   const acceleration = (
     mode === "carry" ? 650
       : mode === "recover" ? 780
+      : mode === "run-fit" ? 520
       : mode === "rally" ? 540
         : mode === "wall" ? 500
           : isDeepSafety ? 320
             : 420
-  ) * speedBoost;
+  ) * speedBoost * movementMultiplier;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
