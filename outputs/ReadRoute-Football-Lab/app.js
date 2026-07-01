@@ -6287,10 +6287,19 @@ function bodyMovementProfile(body, nextPosture, gapX, gapY, safeDelta) {
   body.hips ||= "square";
   body.turnDelay ||= 0;
   const changingToOpen = body.posture !== "open" && nextPosture === "open";
+  const changingToRecover = body.posture !== "recover" && nextPosture === "recover";
   const changingDirection = Math.sign(gapX || 0) && body.hips !== "square"
     && body.hips !== (gapX < 0 ? "left" : "right");
-  if (changingToOpen || changingDirection) {
-    body.turnDelay = Math.max(body.turnDelay || 0, changingToOpen ? .12 : .08);
+  const plantingToDrive = body.posture !== "drive" && nextPosture === "drive";
+  if (changingToOpen || changingToRecover || changingDirection || plantingToDrive) {
+    const delay = changingToRecover
+      ? .32
+      : changingToOpen
+        ? .24
+        : plantingToDrive
+          ? .18
+          : .14;
+    body.turnDelay = Math.max(body.turnDelay || 0, delay);
   }
   if (body.turnDelay > 0) body.turnDelay = Math.max(0, body.turnDelay - safeDelta);
   body.posture = nextPosture;
@@ -6300,18 +6309,24 @@ function bodyMovementProfile(body, nextPosture, gapX, gapY, safeDelta) {
     body.hips = "square";
   }
   const multipliers = {
-    backpedal: { speed: .68, accel: .62 },
-    shuffle: { speed: .72, accel: .7 },
-    open: { speed: 1, accel: .88 },
-    drive: { speed: .9, accel: 1 },
-    recover: { speed: 1.08, accel: .92 }
+    backpedal: { speed: .46, accel: .44 },
+    shuffle: { speed: .56, accel: .56 },
+    open: { speed: .88, accel: .72 },
+    drive: { speed: .76, accel: .82 },
+    recover: { speed: .96, accel: .76 }
   };
   const base = multipliers[nextPosture] || multipliers.shuffle;
-  const turnPenalty = body.turnDelay > 0 ? .58 : 1;
+  const turnPenalty = body.turnDelay > 0 ? .38 : 1;
   return {
     speed: base.speed * turnPenalty,
     accel: base.accel * turnPenalty
   };
+}
+
+function approachSpeedLimit(maxSpeed, separation, slowRadius = 42) {
+  if (separation >= slowRadius) return maxSpeed;
+  const ratio = Math.max(.28, separation / slowRadius);
+  return maxSpeed * ratio;
 }
 
 function trafficSlowdown(point, receivers, defenderId = "") {
@@ -6399,8 +6414,8 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
     const leverage = Math.max(-42, Math.min(42, state.horizontalLeverage));
     targetX = receiverPosition.x + leverage;
     targetY = state.start.y;
-    maxSpeed = (state.initialCushion < 55 ? 104 : 92) * (.92 + ((profile.aggressiveness || .5) * .16));
-    acceleration = (state.initialCushion < 55 ? 560 : 450) * (.88 + ((profile.awareness || .7) * .2));
+    maxSpeed = (state.initialCushion < 55 ? 82 : 74) * (.9 + ((profile.aggressiveness || .5) * .12));
+    acceleration = (state.initialCushion < 55 ? 360 : 300) * (.86 + ((profile.awareness || .7) * .16));
   } else if (state.phase === "carry") {
     // Open and carry from an over-the-top position instead of chasing the receiver's hip.
     const baseCarryCushion = state.initialCushion < 55 ? 20 : 30;
@@ -6413,10 +6428,10 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
     targetY = Math.min(state.start.y, receiverPosition.y - desiredCushion);
     const receiverIsLevel = cushion < 10;
     const cushionThreatened = cushion < 24;
-    maxSpeed = (receiverIsLevel ? 154 : cushionThreatened ? 140 : 122)
-      * (.9 + ((profile.aggressiveness || .5) * .18));
-    acceleration = (receiverIsLevel ? 940 : cushionThreatened ? 800 : 680)
-      * (.88 + ((profile.awareness || .7) * .22));
+    maxSpeed = (receiverIsLevel ? 116 : cushionThreatened ? 106 : 94)
+      * (.9 + ((profile.aggressiveness || .5) * .14));
+    acceleration = (receiverIsLevel ? 620 : cushionThreatened ? 520 : 430)
+      * (.86 + ((profile.awareness || .7) * .18));
   } else {
     // Once the receiver declares the break, plant and drive toward the upfield hip.
     const trailDistance = state.deepThreatened ? 8 : 5;
@@ -6426,9 +6441,9 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
       receiverPosition.x - state.x,
       receiverPosition.y - state.y
     );
-    maxSpeed = (separationFromReceiver > 55 ? 142 : separationFromReceiver > 30 ? 128 : 116)
-      * (.9 + ((profile.aggressiveness || .5) * .2));
-    acceleration = 820 * (.86 + ((profile.awareness || .7) * .24));
+    maxSpeed = (separationFromReceiver > 55 ? 112 : separationFromReceiver > 30 ? 102 : 88)
+      * (.9 + ((profile.aggressiveness || .5) * .16));
+    acceleration = 560 * (.86 + ((profile.awareness || .7) * .18));
   }
 
   const gapX = targetX - state.x;
@@ -6440,8 +6455,9 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
       ? "drive"
       : "shuffle";
   const bodyProfile = bodyMovementProfile(state.body, nextPosture, gapX, gapY, safeDelta);
-  const desiredVx = separation ? (gapX / separation) * maxSpeed * bodyProfile.speed : 0;
-  const desiredVy = separation ? (gapY / separation) * maxSpeed * bodyProfile.speed : 0;
+  const controlledSpeed = approachSpeedLimit(maxSpeed * bodyProfile.speed, separation, state.phase === "drive" ? 32 : 46);
+  const desiredVx = separation ? (gapX / separation) * controlledSpeed : 0;
+  const desiredVy = separation ? (gapY / separation) * controlledSpeed : 0;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * bodyProfile.accel * safeDelta;
   const velocityRatio = velocityChange
@@ -7086,34 +7102,39 @@ function moveZoneDefender(
   const bodyProfile = bodyMovementProfile(state.body, nextPosture, gapX, gapY, safeDelta);
   const traffic = trafficSlowdown(state, receivers);
   const movementMultiplier = mode === "carry" || mode === "recover"
-    ? 1
+    ? .92
     : mode === "run-fit"
-      ? .86
+      ? .72
       : gapY < -8
-        ? .68
+        ? .56
         : Math.abs(gapX) > Math.abs(gapY) * 1.2
-          ? .72
-          : .62;
+          ? .62
+          : .52;
   const maxSpeed = (
-    mode === "carry" ? 134
-      : mode === "recover" ? 150
-      : mode === "run-fit" ? 108
-      : mode === "rally" ? 120
-        : mode === "wall" ? 104
-          : isDeepSafety ? 72
-            : isFlatDefender ? 92
-              : 86
+    mode === "carry" ? 106
+      : mode === "recover" ? 118
+      : mode === "run-fit" ? 84
+      : mode === "rally" ? 90
+        : mode === "wall" ? 78
+          : isDeepSafety ? 58
+            : isFlatDefender ? 72
+              : 68
   ) * speedBoost * movementMultiplier * bodyProfile.speed * traffic;
-  const desiredVx = separation ? (gapX / separation) * maxSpeed : 0;
-  const desiredVy = separation ? (gapY / separation) * maxSpeed : 0;
+  const controlledSpeed = approachSpeedLimit(
+    maxSpeed,
+    separation,
+    mode === "carry" || mode === "recover" ? 38 : 52
+  );
+  const desiredVx = separation ? (gapX / separation) * controlledSpeed : 0;
+  const desiredVy = separation ? (gapY / separation) * controlledSpeed : 0;
   const acceleration = (
-    mode === "carry" ? 650
-      : mode === "recover" ? 780
-      : mode === "run-fit" ? 520
-      : mode === "rally" ? 540
-        : mode === "wall" ? 500
-          : isDeepSafety ? 320
-            : 420
+    mode === "carry" ? 420
+      : mode === "recover" ? 520
+      : mode === "run-fit" ? 330
+      : mode === "rally" ? 360
+        : mode === "wall" ? 330
+          : isDeepSafety ? 210
+            : 280
   ) * speedBoost * movementMultiplier * bodyProfile.accel * traffic;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
@@ -7172,6 +7193,7 @@ function previewMovement(scope) {
   const startedAt = performance.now();
   const defensiveRepId = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const baseSpeed = 115;
+  const defensiveBaseSpeed = 82;
   const playbackScale = scope === "run" || scope === "test" ? runSpeed : 1;
   const animateOffense = scope === "run" || scope === "test" || scope === "play";
   const animateDefense = scope === "defense"
@@ -7215,14 +7237,14 @@ function previewMovement(scope) {
           ? Math.random() * .28
           : 0;
         const repTempo = scope === "run" || scope === "test"
-          ? .82 + (Math.random() * .34)
+          ? .74 + (Math.random() * .22)
           : 1;
         const animatedRoute = route.map((point, index) => ({
           ...point,
           x: point.x + ((Math.random() - .5) * Math.min(10, 3 + index * 1.5)),
           y: point.y + ((Math.random() - .5) * Math.min(8, 2 + index * 1.2))
         }));
-        const routeDuration = pathDuration(start, animatedRoute, baseSpeed * repTempo);
+        const routeDuration = pathDuration(start, animatedRoute, defensiveBaseSpeed * repTempo);
         const zoneStart = animatedRoute.length
           ? { ...animatedRoute[animatedRoute.length - 1] }
           : { ...start };
@@ -7419,7 +7441,7 @@ function previewMovement(scope) {
               start,
               route,
               defenderElapsed,
-              baseSpeed * repTempo
+              defensiveBaseSpeed * repTempo
             );
             return;
           }
@@ -7456,7 +7478,7 @@ function previewMovement(scope) {
             start,
             route,
             defenderElapsed,
-            baseSpeed * repTempo
+            defensiveBaseSpeed * repTempo
           );
         }
       });
