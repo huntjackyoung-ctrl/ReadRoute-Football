@@ -6863,6 +6863,16 @@ function moveZoneDefender(
     : isFlatDefender || isCurlFlat
       ? 1.62
       : 1.5;
+  const zoneThreatLimit = isDeepSafety ? 1.55 : 1.28;
+  const inZoneThreatCount = receiverCandidates.filter(receiver =>
+    receiver.zoneDistance <= zoneThreatLimit
+  ).length;
+  const emptyZoneFindWork = elapsed >= reactionTime && inZoneThreatCount === 0;
+  const findWorkLimit = isDeepSafety
+    ? 2.1
+    : isFlatDefender || isCurlFlat
+      ? 2.45
+      : 1.85;
   const visionPullChance = Math.min(
     .76,
     .12
@@ -6872,12 +6882,26 @@ function moveZoneDefender(
   );
   const threats = receiverCandidates
     .filter(receiver => {
-      const inZoneRange = receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28);
+      const inZoneRange = receiver.zoneDistance <= zoneThreatLimit;
+      const routeCanPullEyes = receiver.read.isVertical
+        || receiver.read.isCrosser
+        || receiver.read.isFlat
+        || receiver.read.isComingBack;
+      const findWorkPull = emptyZoneFindWork
+        && receiver.vision?.visible
+        && receiver.zoneDistance <= findWorkLimit
+        && routeCanPullEyes;
       const visiblePull = receiver.vision?.clear
         && receiver.zoneDistance <= visionPullLimit
-        && (receiver.read.isVertical || receiver.read.isCrosser || receiver.read.isFlat)
+        && routeCanPullEyes
         && (profile.wrongChoice < visionPullChance || profile.eyes === "receiver" || profile.eyes === "nearest");
-      return inZoneRange || visiblePull;
+      if (findWorkPull) {
+        receiver.findWorkPull = true;
+        receiver.threatScore += (isFlatDefender || isCurlFlat ? 42 : 28)
+          + ((profile.awareness || .7) * 12)
+          + ((receiver.vision?.score || 0) * 20);
+      }
+      return inZoneRange || visiblePull || findWorkPull;
     })
     .sort((a, b) => b.threatScore - a.threatScore);
 
@@ -7004,11 +7028,12 @@ function moveZoneDefender(
     const primaryOutsideZone = primary.zoneDistance > 1.08;
     const eyePullAmount = primaryOutsideZone
       ? Math.min(
-          .62,
+          primary.findWorkPull ? .82 : .62,
           .18
             + ((primary.vision?.score || 0) * .24)
             + ((profile.aggressiveness || .5) * .12)
             + ((1 - (profile.discipline || .7)) * .18)
+            + (primary.findWorkPull ? .22 : 0)
         )
       : 1;
     if (isDeepSafety) {
@@ -7077,7 +7102,8 @@ function moveZoneDefender(
   const assignedThreat = state.primaryThreatId
     ? threats.find(threat => threat.id === state.primaryThreatId)
     : null;
-  const pulledByVision = assignedThreat?.zoneDistance > 1.08 && assignedThreat?.vision?.clear;
+  const pulledByVision = assignedThreat?.zoneDistance > 1.08
+    && (assignedThreat?.vision?.clear || assignedThreat?.findWorkPull);
   if (!carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
