@@ -1991,6 +1991,41 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   cursor: pointer;
 }
 .drawing-guide { pointer-events: none; }
+.qb-look-line {
+  stroke: rgba(201, 244, 92, .72);
+  stroke-width: 3;
+  stroke-dasharray: 7 8;
+  pointer-events: none;
+}
+.qb-look-dot {
+  fill: #c9f45c;
+  stroke: #10231c;
+  stroke-width: 2;
+  pointer-events: none;
+}
+.throw-trajectory {
+  stroke: rgba(255, 253, 247, .42);
+  stroke-width: 2;
+  stroke-dasharray: 6 7;
+  pointer-events: none;
+}
+.test-football {
+  fill: #8b4a22;
+  stroke: #fff2d1;
+  stroke-width: 2;
+  pointer-events: none;
+}
+.throw-result {
+  font-size: 26px;
+  font-weight: 950;
+  paint-order: stroke;
+  stroke: rgba(8, 20, 14, .82);
+  stroke-width: 5px;
+  pointer-events: none;
+}
+.throw-result.complete { fill: #c9f45c; }
+.throw-result.breakup { fill: #ffd166; }
+.throw-result.interception { fill: #ff6b4a; }
 .field-route-line {
   vector-effect: non-scaling-stroke;
   shape-rendering: geometricPrecision;

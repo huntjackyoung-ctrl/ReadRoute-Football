@@ -267,6 +267,8 @@ let testAnswerRevealed = false;
 let testRoundReady = false;
 let testSessionPlayIds = [];
 let testSessionIndex = -1;
+let testQbLookPoint = null;
+let testThrowState = null;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let libraryPreviewContext = null;
@@ -3247,11 +3249,81 @@ function testEligiblePlays() {
   return sourcePlays.filter(play => testPlayIds.has(play.id));
 }
 
+function resetTestInteraction() {
+  testQbLookPoint = null;
+  testThrowState = null;
+}
+
+function currentTestQbLookPoint() {
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return null;
+  return testQbLookPoint;
+}
+
+function nearestDefendersTo(point) {
+  return Object.entries(animationState?.defense || currentDefenseEditorPositions())
+    .map(([id, defenderPoint]) => ({
+      id,
+      point: defenderPoint,
+      distance: Math.hypot(defenderPoint.x - point.x, defenderPoint.y - point.y)
+    }))
+    .sort((a, b) => a.distance - b.distance);
+}
+
+function evaluateThrowOutcome(receiverId, targetPoint) {
+  const receiverPoint = animationState?.offense?.[receiverId] || offensePosition(receiverId);
+  const defenders = nearestDefendersTo(targetPoint);
+  const nearest = defenders[0];
+  const second = defenders[1];
+  const qbPoint = animationState?.offense?.QB || offensePosition("QB");
+  const throwDistance = Math.hypot(targetPoint.x - qbPoint.x, targetPoint.y - qbPoint.y);
+  const nearestDistance = nearest?.distance ?? 999;
+  const secondDistance = second?.distance ?? 999;
+  const passingLaneThreat = defenders
+    .filter(defender => pointLineDistance(defender.point, qbPoint, targetPoint) < 18)
+    .sort((a, b) => a.distance - b.distance)[0];
+  let risk = 0;
+  risk += nearestDistance < 13 ? 72 : nearestDistance < 22 ? 42 : nearestDistance < 34 ? 20 : 0;
+  risk += secondDistance < 24 ? 14 : 0;
+  risk += passingLaneThreat ? 20 : 0;
+  risk += throwDistance > 360 ? 14 : throwDistance > 250 ? 7 : 0;
+  const routeDepth = Math.max(0, lineOfScrimmage - receiverPoint.y);
+  risk += routeDepth > 210 ? 10 : 0;
+  const roll = Math.random() * 100;
+  if (nearestDistance < 11 && roll < risk * .42) {
+    return { label: "Intercepted", className: "interception", defenderId: nearest.id };
+  }
+  if ((passingLaneThreat && roll < risk * .55) || roll < risk) {
+    return { label: "Broken up", className: "breakup", defenderId: passingLaneThreat?.id || nearest?.id || "" };
+  }
+  return { label: "Complete", className: "complete", defenderId: "" };
+}
+
+function startTestThrow(receiverId) {
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed || !animationPlayback) return;
+  if (testThrowState && !testThrowState.resolved) return;
+  const start = { ...(animationState?.offense?.QB || offensePosition("QB")) };
+  const target = { ...(animationState?.offense?.[receiverId] || offensePosition(receiverId)) };
+  const distance = Math.hypot(target.x - start.x, target.y - start.y);
+  const flightSpeed = 760;
+  testThrowState = {
+    receiverId,
+    start,
+    target,
+    startedAt: performance.now(),
+    duration: Math.max(.18, distance / flightSpeed),
+    resolved: false,
+    outcome: null
+  };
+  els.testStatus.textContent = `Throwing to ${offenseLabel(receiverId)}...`;
+  renderRoutesAndPlayers();
+}
+
 function resetTestSession() {
   testRoundReady = false;
   testAnswerRevealed = false;
   testSessionPlayIds = [];
   testSessionIndex = -1;
+  resetTestInteraction();
   stopAnimationPlayback();
   const sessionButton = document.querySelector("#newTestRoundButton");
   const runButton = document.querySelector("#runTestButton");
@@ -3388,7 +3460,7 @@ function renderTestControls() {
     ? "Choose your plays and defenses, then start the test."
     : testAnswerRevealed
       ? `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-      : `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name}`;
+      : `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name}. Press Space to snap.`;
 }
 
 function loadNextTestPlay() {
@@ -3425,6 +3497,7 @@ function loadNextTestPlay() {
   selectedDefenseId = defense.id;
   testAnswerRevealed = false;
   testRoundReady = true;
+  resetTestInteraction();
   resetRunScenario();
   render();
 }
@@ -3678,6 +3751,65 @@ function appendSegmentSpeedControl(handle, point) {
   handle.append(foreignObject);
 }
 
+function renderTestInteractionOverlay() {
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
+  const qbPoint = offensePosition("QB");
+  if (testQbLookPoint) {
+    els.routes.append(svgEl("line", {
+      class: "qb-look-line",
+      x1: qbPoint.x,
+      y1: qbPoint.y,
+      x2: testQbLookPoint.x,
+      y2: testQbLookPoint.y
+    }));
+    els.routes.append(svgEl("circle", {
+      class: "qb-look-dot",
+      cx: testQbLookPoint.x,
+      cy: testQbLookPoint.y,
+      r: 6
+    }));
+  }
+  if (!testThrowState) return;
+  const elapsed = (performance.now() - testThrowState.startedAt) / 1000;
+  const progress = Math.max(0, Math.min(1, elapsed / testThrowState.duration));
+  const arc = Math.sin(progress * Math.PI) * 18;
+  const ballPoint = {
+    x: testThrowState.start.x + ((testThrowState.target.x - testThrowState.start.x) * progress),
+    y: testThrowState.start.y + ((testThrowState.target.y - testThrowState.start.y) * progress) - arc
+  };
+  els.routes.append(svgEl("line", {
+    class: "throw-trajectory",
+    x1: testThrowState.start.x,
+    y1: testThrowState.start.y,
+    x2: testThrowState.target.x,
+    y2: testThrowState.target.y
+  }));
+  const football = svgEl("ellipse", {
+    class: "test-football",
+    cx: ballPoint.x,
+    cy: ballPoint.y,
+    rx: 10,
+    ry: 5,
+    transform: `rotate(${Math.atan2(testThrowState.target.y - testThrowState.start.y, testThrowState.target.x - testThrowState.start.x) * 180 / Math.PI} ${ballPoint.x} ${ballPoint.y})`
+  });
+  els.routes.append(football);
+  if (progress >= 1 && !testThrowState.resolved) {
+    testThrowState.outcome = evaluateThrowOutcome(testThrowState.receiverId, testThrowState.target);
+    testThrowState.resolved = true;
+    els.testStatus.textContent = `${testThrowState.outcome.label} to ${offenseLabel(testThrowState.receiverId)}${testThrowState.outcome.defenderId ? ` by ${currentDefense().labels[testThrowState.outcome.defenderId] || testThrowState.outcome.defenderId}` : ""}.`;
+  }
+  if (testThrowState.resolved && testThrowState.outcome) {
+    const resultText = svgEl("text", {
+      class: `throw-result ${testThrowState.outcome.className}`,
+      x: testThrowState.target.x,
+      y: testThrowState.target.y - 34,
+      "text-anchor": "middle"
+    });
+    resultText.textContent = testThrowState.outcome.label;
+    els.routes.append(resultText);
+  }
+}
+
 function renderRoutesAndPlayers() {
   els.routes.innerHTML = "";
   els.players.innerHTML = "";
@@ -3857,6 +3989,10 @@ function renderRoutesAndPlayers() {
     makeMovable(group, "offense", position.id);
     group.addEventListener("click", event => {
       event.stopPropagation();
+      if (appTab === "test" && testRoundReady && !testAnswerRevealed) {
+        startTestThrow(position.id);
+        return;
+      }
       const createMan = appTab === "create" && createScreen === "defense"
         && defenseAssignmentMode === "man" && activeRouteSide === "defense";
       const scenarioMan = appTab === "run" && scenarioEditing
@@ -4026,6 +4162,7 @@ function renderRoutesAndPlayers() {
   qbText.textContent = "QB";
   qb.append(qbText);
   els.players.append(qb);
+  renderTestInteractionOverlay();
 
   const editingCreateQbPath = appTab === "create" && createScreen === "play"
     && activeRouteSide === "offense" && activeRouteId === "QB";
@@ -4100,6 +4237,18 @@ function vectorToward(from, to) {
     x: to.x - from.x,
     y: to.y - from.y
   });
+}
+
+function pointLineDistance(point, start, end) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const lengthSquared = (dx * dx) + (dy * dy) || 1;
+  const t = Math.max(0, Math.min(1, (((point.x - start.x) * dx) + ((point.y - start.y) * dy)) / lengthSquared));
+  const projection = {
+    x: start.x + (dx * t),
+    y: start.y + (dy * t)
+  };
+  return Math.hypot(point.x - projection.x, point.y - projection.y);
 }
 
 function backfieldReadPoint() {
@@ -5527,7 +5676,7 @@ function render() {
     : defenseAssignmentMode === "man"
     ? "Click a defender, then click the receiver or back they guard."
     : defenseAssignmentMode === "zone"
-      ? "Place the defender's zone, then label its type. Any custom movement already drawn will run first at the snap."
+      ? "Place the defender's zone. Any custom movement already drawn will run first at the snap."
       : "Draw the defender's snap movement. You can also assign a zone that takes over when the movement ends.";
   els.boardModeStatus.textContent = defenseAlignmentMode
     ? "Setting alignment for"
@@ -5550,8 +5699,8 @@ function render() {
       ? "Click a defender, then click the receiver or back they guard."
     : createScreen === "defense" && defenseAssignmentMode === "zone"
       ? currentDefense().zoneAssignments?.[activeRouteId]
-        ? "Drag or reshape the zone, then label it Deep, Hook Curl, Mid, Flat, or Seam Flat."
-        : "Click the field to place the zone. After it exists, label what type of coverage it is."
+        ? "Drag or reshape the zone. Deep zones will protect the roof by rule."
+        : "Click the field to place the reactive zone. The defender's custom movement can remain in place."
     : createScreen === "play" && playPathType === "motion"
       ? "Click the field to draw pre-snap motion. The route will begin where the motion ends."
     : createScreen === "play" && selectedRouteOptionId !== "base"
@@ -5596,7 +5745,7 @@ function render() {
         ? "Choose the plays and defenses for this session, then start the test."
         : testAnswerRevealed
           ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-          : `${currentFormation().name} / ${currentPlay().name}. Diagnose the defensive shell and identify what comes open.`)
+          : `${currentFormation().name} / ${currentPlay().name}. Space snaps it, move your mouse for QB eyes, click a receiver to throw.`)
     : appTab === "run"
     ? (activeRunRouteOptions().length
         ? `Active options: ${activeRunRouteOptions().map(item =>
@@ -5833,6 +5982,12 @@ function updateDrawingGuide(event) {
   });
   els.routes.append(guide);
 }
+
+els.field.addEventListener("pointermove", event => {
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
+  testQbLookPoint = eventToFieldPoint(event);
+  renderRoutesAndPlayers();
+});
 
 els.field.addEventListener("click", event => {
   if (Date.now() < suppressFieldClickUntil) {
@@ -7013,6 +7168,24 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   return score;
 }
 
+function qbLookRouteInfluence(receiver, defenderState, playIntent = {}, style = {}) {
+  const lookPoint = playIntent.qbLookPoint;
+  if (!lookPoint) return 0;
+  const qbPoint = animationState?.offense?.QB || offensePosition("QB");
+  const laneDistance = pointLineDistance(receiver, qbPoint, lookPoint);
+  const lookDistance = Math.hypot(receiver.x - lookPoint.x, receiver.y - lookPoint.y);
+  const closeToLook = laneDistance < 38 || lookDistance < 72;
+  if (!closeToLook) return 0;
+  const profile = defenderState.profile || {};
+  const susceptibility = .18
+    + ((profile.aggressiveness || .5) * .26)
+    + ((1 - (profile.discipline || .7)) * .32)
+    + ((profile.mistakeRate || 0) * .34);
+  const deepDiscount = style.isDeepSafety ? .35 : 1;
+  const lookStrength = Math.max(0, 1 - Math.min(1, laneDistance / 62));
+  return lookStrength * susceptibility * deepDiscount * 42;
+}
+
 function moveZoneDefender(
   state,
   zone,
@@ -7053,8 +7226,10 @@ function moveZoneDefender(
         read
       };
       const vision = receiverVisionInfo(enriched, state, style, profile, influence, readLandmark);
+      const qbLookScore = qbLookRouteInfluence(enriched, state, playIntent, style);
       return {
         ...enriched,
+        qbLookScore,
         vision,
         threatScore: receiverThreatScore(
           enriched,
@@ -7065,7 +7240,7 @@ function moveZoneDefender(
           coverageClaims.get(receiver.id) || 0,
           receiverIndex,
           vision
-        )
+        ) + qbLookScore
       };
     });
   state.lastSeenThreats = Object.fromEntries(
@@ -7740,6 +7915,9 @@ function previewMovement(scope) {
       };
     });
     const coverageClaims = new Map();
+    const framePlayIntent = scope === "test"
+      ? { ...activePlayIntent, qbLookPoint: currentTestQbLookPoint() }
+      : activePlayIntent;
     if (animateDefense) {
       defensePaths.forEach(({
         id,
@@ -7864,7 +8042,7 @@ function previewMovement(scope) {
             defenderDelta,
             hasDeepHelp,
             coverageClaims,
-            activePlayIntent
+            framePlayIntent
           );
           animationPlayback.defenderEyes[id] = {
             facing: zoneState.facing,
@@ -8025,25 +8203,38 @@ document.querySelector("#clearTestDefenses").addEventListener("click", () => {
 
 document.querySelector("#newTestRoundButton").addEventListener("click", loadNextTestPlay);
 
-document.querySelector("#runTestButton").addEventListener("click", () => {
+function snapTestBall() {
   if (!testRoundReady) return;
   if (animationPlayback?.paused) {
     toggleRunPlayback();
     return;
   }
+  resetTestInteraction();
   testAnswerRevealed = false;
   render();
   previewMovement("test");
+}
+
+document.querySelector("#runTestButton").addEventListener("click", snapTestBall);
+
+document.addEventListener("keydown", event => {
+  if (event.code !== "Space" || appTab !== "test" || !testRoundReady) return;
+  const target = event.target;
+  if (target && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
+  event.preventDefault();
+  snapTestBall();
 });
 
 document.querySelector("#resetTestButton").addEventListener("click", () => {
   if (!testRoundReady) return;
+  resetTestInteraction();
   resetAnimation();
 });
 
 document.querySelector("#revealTestButton").addEventListener("click", () => {
   if (!testRoundReady) return;
   stopAnimationPlayback();
+  resetTestInteraction();
   testAnswerRevealed = !testAnswerRevealed;
   render();
 });
