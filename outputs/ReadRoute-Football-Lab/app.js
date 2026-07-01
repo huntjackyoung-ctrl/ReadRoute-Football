@@ -3307,6 +3307,8 @@ function scheduleTestThrowRender() {
   const tick = () => {
     if (!animationPlayback && completedTestCatchActive()) {
       advanceTestCatchRun(1 / 60);
+      rallyTestDefenseToBall(1 / 60);
+      resolveTestCatchTackle();
     }
     renderRoutesAndPlayers();
     if ((testThrowState && !testThrowState.resolved) || completedTestCatchActive()) {
@@ -3338,23 +3340,56 @@ function advanceTestCatchRun(deltaSeconds) {
   };
   testThrowState.catchRun.current = next;
   animationState.offense[id] = next;
-  const tackler = nearestDefendersTo(next)
+  return !resolveTestCatchTackle(next) && next.y > fieldPadding + 3;
+}
+
+function resolveTestCatchTackle(ballPoint = testThrowState?.catchRun?.current) {
+  if (!completedTestCatchActive() || !ballPoint) return false;
+  const id = testThrowState.receiverId;
+  const tackler = nearestDefendersTo(ballPoint)
     .filter(defender => defender.distance <= 17)
     .sort((a, b) => a.distance - b.distance)[0];
-  if (tackler) {
-    testThrowState.catchRun.tackled = true;
-    testThrowState.catchRun.tacklerId = tackler.id;
-    testThrowState.catchRun.current = {
-      ...next,
-      x: (next.x + tackler.point.x) / 2,
-      y: (next.y + tackler.point.y) / 2
-    };
-    animationState.offense[id] = { ...testThrowState.catchRun.current };
-    const tacklerLabel = currentDefense().labels[tackler.id] || tackler.id;
-    els.testStatus.textContent = `${offenseLabel(id)} tackled by ${tacklerLabel}.`;
-    return false;
-  }
-  return next.y > fieldPadding + 3;
+  if (!tackler) return false;
+  testThrowState.catchRun.tackled = true;
+  testThrowState.catchRun.tacklerId = tackler.id;
+  testThrowState.catchRun.current = {
+    ...ballPoint,
+    x: (ballPoint.x + tackler.point.x) / 2,
+    y: (ballPoint.y + tackler.point.y) / 2
+  };
+  animationState.offense[id] = { ...testThrowState.catchRun.current };
+  const tacklerLabel = currentDefense().labels[tackler.id] || tackler.id;
+  els.testStatus.textContent = `${offenseLabel(id)} tackled by ${tacklerLabel}.`;
+  return true;
+}
+
+function rallyDefenderToBall(id, current, ballPoint, deltaSeconds, urgency = 1) {
+  const direction = vectorToward(current, ballPoint);
+  const distance = Math.hypot(ballPoint.x - current.x, ballPoint.y - current.y);
+  const rallySpeed = Math.min(245, 135 + (distance * .34)) * urgency;
+  const step = Math.min(distance, rallySpeed * Math.max(.008, deltaSeconds));
+  return {
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (direction.x * step))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, current.y + (direction.y * step)))
+  };
+}
+
+function rallyTestDefenseToBall(deltaSeconds) {
+  if (!completedTestCatchActive()) return;
+  animationState ||= { offense: {}, defense: {} };
+  const ballPoint = testThrowState.catchRun.current;
+  const defenders = Object.entries(animationState.defense || currentDefenseEditorPositions());
+  defenders.forEach(([id, current]) => {
+    const rallied = rallyDefenderToBall(id, current, ballPoint, deltaSeconds, 1);
+    animationState.defense[id] = rallied;
+    if (animationPlayback) {
+      animationPlayback.defenderEyes[id] = {
+        facing: vectorToward(rallied, ballPoint),
+        mode: "rally",
+        targetId: testThrowState.receiverId || ""
+      };
+    }
+  });
 }
 
 function nearestCatchableReceiver(targetPoint, maxDistance = 36) {
@@ -8158,6 +8193,18 @@ function previewMovement(scope) {
         const postSnapElapsed = elapsed - maxMotionDuration;
         const defenderElapsed = postSnapElapsed - repDelay;
         const defenderDelta = deltaSeconds * repTempo;
+        if (scope === "test" && completedTestCatchActive()) {
+          const ballPoint = testThrowState.catchRun.current;
+          const current = animationState.defense[id] || start;
+          const rallied = rallyDefenderToBall(id, current, ballPoint, defenderDelta, repTempo);
+          animationState.defense[id] = rallied;
+          animationPlayback.defenderEyes[id] = {
+            facing: vectorToward(rallied, ballPoint),
+            mode: "rally",
+            targetId: testThrowState.receiverId || ""
+          };
+          return;
+        }
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = { id: manTarget, ...(animationState.offense[manTarget] || targetStart) };
@@ -8286,6 +8333,9 @@ function previewMovement(scope) {
           );
         }
       });
+    }
+    if (scope === "test" && completedTestCatchActive()) {
+      resolveTestCatchTackle();
     }
     receiverSnapshots.forEach(receiver => {
       animationPlayback.receiverHistory[receiver.id] = {
