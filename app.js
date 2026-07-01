@@ -7563,12 +7563,20 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   const zonePriority = profile.zonePriority || .72;
   const clearlyInZone = distance <= (style.isDeepSafety ? 1.5 : 1.22);
   const outsideZone = distance > (style.isDeepSafety ? 1.9 : 1.5);
+  const defenderSide = zone.x < fieldWidth / 2 ? "left" : "right";
+  const receiverSide = receiver.x < fieldWidth / 2 ? "left" : "right";
+  const sameSide = defenderSide === receiverSide;
+  const middleZone = Math.abs(zone.x - fieldWidth / 2) < fieldWidth * .14;
   const technique = normalizeDefenderTechnique(state.technique);
   const visionInfo = vision || receiver.vision || { score: 1, clear: true, peripheral: false };
   let score = (1.45 - Math.min(1.45, distance)) * 80;
   if (testMode) {
     score += clearlyInZone ? 30 + (zonePriority * 28) : 0;
     score -= outsideZone && !profile.assignmentMistake ? 34 + (zonePriority * 24) : 0;
+    if (!middleZone) {
+      score += sameSide ? 26 + (zonePriority * 18) : 0;
+      score -= !sameSide && !profile.assignmentMistake ? 42 + (zonePriority * 26) : 0;
+    }
   }
   score += Math.min(30, Math.max(-12, movingIntoZone * 125));
   score += Math.min(24, read.verticalSpeed * .16);
@@ -7719,9 +7727,10 @@ function moveZoneDefender(
       ? 1.62
       : 1.5;
   const zoneThreatLimit = isDeepSafety ? 1.55 : 1.28;
-  const inZoneThreatCount = receiverCandidates.filter(receiver =>
+  const inZoneThreats = receiverCandidates.filter(receiver =>
     receiver.zoneDistance <= zoneThreatLimit
-  ).length;
+  );
+  const inZoneThreatCount = inZoneThreats.length;
   const emptyZoneFindWork = elapsed >= reactionTime && inZoneThreatCount === 0;
   const findWorkLimit = isDeepSafety
     ? 2.1
@@ -7738,6 +7747,10 @@ function moveZoneDefender(
   const threats = receiverCandidates
     .filter(receiver => {
       const inZoneRange = receiver.zoneDistance <= zoneThreatLimit;
+      const defenderSide = zone.x < fieldWidth / 2 ? "left" : "right";
+      const receiverSide = receiver.x < fieldWidth / 2 ? "left" : "right";
+      const middleZone = Math.abs(zone.x - fieldWidth / 2) < fieldWidth * .14;
+      const sameSide = middleZone || defenderSide === receiverSide;
       const routeCanPullEyes = receiver.read.isVertical
         || receiver.read.isCrosser
         || receiver.read.isFlat
@@ -7749,6 +7762,7 @@ function moveZoneDefender(
       const visiblePull = receiver.vision?.clear
         && receiver.zoneDistance <= visionPullLimit
         && routeCanPullEyes
+        && (sameSide || profile.assignmentMistake || emptyZoneFindWork)
         && (
           (!profile.testMode && (profile.eyes === "receiver" || profile.eyes === "nearest"))
           || profile.assignmentMistake
@@ -7989,12 +8003,20 @@ function moveZoneDefender(
           : Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
       };
     } else {
+      const splitZone = profile.testMode
+        && inZoneThreatCount > 1
+        && !profile.assignmentMistake
+        && technique !== "matchVertical"
+        && technique !== "jumpFirst";
+      const singleZoneThreat = profile.testMode
+        && inZoneThreatCount === 1
+        && primary.zoneDistance <= zoneThreatLimit;
       const shouldRallyFlat = (isFlatDefender || isCurlFlat)
         && primary.read.isFlat
         && technique !== "keepDepth"
         && technique !== "matchVertical"
         && (primary.zoneDistance < 1.08 || primary.vision?.clear || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
-      const shouldCarryVertical = primary.read.isVertical
+      const shouldCarryVertical = !splitZone && primary.read.isVertical
         && (technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
         && (primary.y < readLandmark.y + radii.y * .28 || (primaryOutsideZone && primary.vision?.clear));
       const shouldWallCrosser = (isHook || technique === "wallCrosser" || technique === "robInside")
@@ -8026,6 +8048,26 @@ function moveZoneDefender(
         target = {
           x: readLandmark.x + ((primary.x - readLandmark.x) * .58),
           y: Math.min(readLandmark.y + radii.y * .22, primary.y - 10)
+        };
+      } else if (splitZone) {
+        mode = "midpoint";
+        const sortedZoneThreats = [...inZoneThreats].sort((a, b) => a.x - b.x);
+        const left = sortedZoneThreats[0];
+        const right = sortedZoneThreats[sortedZoneThreats.length - 1];
+        const deepest = sortedZoneThreats.reduce((best, threat) =>
+          threat.y < best.y ? threat : best, sortedZoneThreats[0]);
+        target = {
+          x: (left.x + right.x) / 2,
+          y: Math.min(readLandmark.y + radii.y * .18, deepest.y + 16)
+        };
+      } else if (singleZoneThreat) {
+        mode = primary.read.isVertical ? "carry" : "rally";
+        const cushion = primary.read.isVertical ? Math.max(18, profile.cushion * .65) : 8;
+        target = {
+          x: primary.x + ((profile.leverageNoise || 0) * .16),
+          y: primary.read.isVertical
+            ? Math.min(readLandmark.y, primary.y - cushion)
+            : primary.y - 6
         };
       } else {
         mode = "spot";
