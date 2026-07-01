@@ -7056,10 +7056,11 @@ function deepRouteScanVector(state, receivers, readLandmark, elapsed, profile = 
 
 function deepZonePedalTarget(state, zone, readLandmark, elapsed = 0, roofDefender = false) {
   const radii = zoneRadii(zone);
+  const outsideDeepThird = roofDefender && (zone.x < fieldWidth * .34 || zone.x > fieldWidth * .66);
   const dropDepth = (roofDefender ? 70 : 48) + Math.min(54, elapsed * 58);
   const zoneCap = zone.y - (radii.y * .12);
   return {
-    x: state.start.x + ((readLandmark.x - state.start.x) * (roofDefender ? .42 : .32)),
+    x: state.start.x + ((readLandmark.x - state.start.x) * (outsideDeepThird ? .08 : roofDefender ? .42 : .32)),
     y: Math.min(state.start.y - dropDepth, zoneCap)
   };
 }
@@ -7071,15 +7072,31 @@ function laneCapX(zone, targetX, pad = 8) {
 
 function deepestRoofThreat(receivers, state, zone, roofDefender = false) {
   const radii = zoneRadii(zone);
+  const outsideDeepThird = roofDefender && (zone.x < fieldWidth * .34 || zone.x > fieldWidth * .66);
+  const leftThird = zone.x < fieldWidth / 2;
   const lanePad = roofDefender ? 34 : 18;
   const laneThreats = receivers.filter(receiver => {
+    const sameSide = leftThird ? receiver.x < fieldWidth * .58 : receiver.x > fieldWidth * .42;
     const inLane = Math.abs(receiver.x - zone.x) <= radii.x + lanePad;
-    const deepEnough = receiver.read?.isVertical
-      || receiver.read?.routeDepth > 64
+    const trueVertical = receiver.read?.isVertical
+      && !receiver.read?.isFlat
+      && !receiver.read?.isComingBack;
+    const deepBreaker = receiver.read?.routeDepth > (outsideDeepThird ? 132 : 64)
+      && !receiver.read?.isComingBack;
+    const deepEnough = trueVertical
+      || deepBreaker
       || receiver.y <= state.start.y + 64;
-    return inLane && deepEnough && receiver.vy < 32;
+    return inLane
+      && deepEnough
+      && receiver.vy < 32
+      && (!outsideDeepThird || sameSide);
   });
   return laneThreats.sort((a, b) => {
+    if (outsideDeepThird) {
+      const aVertical = a.read?.isVertical && !a.read?.isFlat && !a.read?.isComingBack;
+      const bVertical = b.read?.isVertical && !b.read?.isFlat && !b.read?.isComingBack;
+      if (aVertical !== bVertical) return aVertical ? -1 : 1;
+    }
     const depthDiff = a.y - b.y;
     if (Math.abs(depthDiff) > 12) return depthDiff;
     return (b.read?.verticalSpeed || 0) - (a.read?.verticalSpeed || 0);
@@ -7456,6 +7473,8 @@ function zoneStyle(zone, state) {
   const isDeepSafety = state.start.y < lineOfScrimmage - 190
     || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75);
   const isFlatDefender = zone.y > lineOfScrimmage - 110;
+  const isOutsideLane = zone.x < fieldWidth * .34
+    || zone.x > fieldWidth * .66;
   const isWideZone = zone.x < fieldWidth * .34
     || zone.x > fieldWidth * .66
     || radii.x > radii.y * 1.18;
@@ -7464,6 +7483,7 @@ function zoneStyle(zone, state) {
     isDeepSafety,
     isFlatDefender,
     isWideZone,
+    isOutsideDeepThird: isDeepSafety && isOutsideLane,
     isCurlFlat: isWideZone && !isDeepSafety,
     isHook: !isDeepSafety && !isWideZone
   };
@@ -7596,6 +7616,16 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     score += receiver.y < state.y + 70 ? 30 : 0;
     score -= read.isComingBack ? 38 * (profile.patience || .7) : 0;
     score -= read.isFlat ? 26 : 0;
+    if (style.isOutsideDeepThird) {
+      const outsideLane = sameSide && distance <= 1.9;
+      const verticalLaneThreat = outsideLane
+        && read.isVertical
+        && !read.isFlat
+        && !read.isComingBack;
+      score += verticalLaneThreat ? 76 + ((profile.discipline || .7) * 28) : 0;
+      score -= read.isFlat || read.isComingBack ? 58 + ((profile.discipline || .7) * 30) : 0;
+      score -= !sameSide && !profile.assignmentMistake ? 48 + ((profile.awareness || .7) * 24) : 0;
+    }
   } else if (style.isFlatDefender || style.isCurlFlat) {
     score += read.isFlat ? 34 * (profile.flatRally || .5) : 0;
     score += read.isCrosser ? 12 : 0;
@@ -7670,7 +7700,7 @@ function moveZoneDefender(
 ) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
   const style = zoneStyle(zone, state);
-  const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
+  const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook, isOutsideDeepThird } = style;
   const profile = state.profile || createDefenderAiProfile(state.start, zone);
   state.profile = profile;
   profile.testMode = Boolean(playIntent?.testMode);
@@ -7794,10 +7824,14 @@ function moveZoneDefender(
     target = deepZonePedalTarget(state, zone, readLandmark, elapsed, roofDefender);
     if (roofDefender && roofThreat) {
       const roofCushion = Math.max(profile.cushion + 18, 56);
+      const outsideLeverage = isOutsideDeepThird
+        ? zone.x < fieldWidth / 2 ? -20 : 20
+        : 0;
       target = {
-        x: laneCapX(zone, roofThreat.x),
+        x: laneCapX(zone, roofThreat.x + outsideLeverage),
         y: Math.min(target.y, roofThreat.y - roofCushion)
       };
+      if (isOutsideDeepThird) mode = "carry";
       state.primaryThreatId = roofThreat.id;
       state.deepThreatId = roofThreat.id;
     }
@@ -7824,18 +7858,34 @@ function moveZoneDefender(
   }
   if (!runFitBite && elapsed >= reactionTime && isDeepSafety) {
     let verticalThreats = receiverCandidates
-      .filter(receiver =>
-        receiver.y <= deepThreatLine + (roofDefender ? 135 : 80)
-        && receiver.vy < 18
-        && (
-          roofDefender
-          || Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
-          || (receiver.vision?.clear && receiver.zoneDistance <= 2.15)
-        )
-      )
+      .filter(receiver => {
+        const sameOutsideSide = zone.x < fieldWidth / 2
+          ? receiver.x < fieldWidth * .58
+          : receiver.x > fieldWidth * .42;
+        const trueVertical = receiver.read.isVertical
+          && !receiver.read.isFlat
+          && !receiver.read.isComingBack;
+        const deepBreaker = receiver.read.routeDepth > (isOutsideDeepThird ? 132 : 74)
+          && !receiver.read.isComingBack
+          && !receiver.read.isFlat;
+        return receiver.y <= deepThreatLine + (roofDefender ? 135 : 80)
+          && receiver.vy < 18
+          && (!isOutsideDeepThird || sameOutsideSide)
+          && (!isOutsideDeepThird || trueVertical || deepBreaker)
+          && (
+            roofDefender
+            || Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
+            || (receiver.vision?.clear && receiver.zoneDistance <= 2.15)
+          );
+      })
       .sort((a, b) => {
         const depthDiff = a.y - b.y;
         if (Math.abs(depthDiff) > 18) return depthDiff;
+        if (isOutsideDeepThird) {
+          const aTrueVertical = a.read.isVertical && !a.read.isFlat && !a.read.isComingBack;
+          const bTrueVertical = b.read.isVertical && !b.read.isFlat && !b.read.isComingBack;
+          if (aTrueVertical !== bTrueVertical) return aTrueVertical ? -1 : 1;
+        }
         return (b.vision?.score || 0) - (a.vision?.score || 0);
       });
     const rareRoofBust = roofDefender
@@ -7850,6 +7900,22 @@ function moveZoneDefender(
       const nearbyVerticals = verticalThreats.filter(receiver =>
         receiver.y <= deepestThreat.y + 80
       );
+      const outsideLaneVerticals = isOutsideDeepThird
+        ? nearbyVerticals.filter(receiver =>
+            receiver.zoneDistance <= 1.95
+            && receiver.read.isVertical
+            && !receiver.read.isFlat
+            && !receiver.read.isComingBack
+            && (
+              zone.x < fieldWidth / 2
+                ? receiver.x < fieldWidth * .58
+                : receiver.x > fieldWidth * .42
+            )
+          )
+        : [];
+      const soloOutsideThirdThreat = outsideLaneVerticals.length === 1
+        ? outsideLaneVerticals[0]
+        : null;
       const leftmost = nearbyVerticals.reduce((left, receiver) =>
         receiver.x < left.x ? receiver : left, deepestThreat);
       const rightmost = nearbyVerticals.reduce((right, receiver) =>
@@ -7876,7 +7942,8 @@ function moveZoneDefender(
       const testRoofThreat = testRoofPool.length > 1
         ? testRoofPool[Math.floor((profile.repSalt || Math.random()) * testRoofPool.length) % testRoofPool.length]
         : null;
-      const selectedThreat = testRoofThreat
+      const selectedThreat = soloOutsideThirdThreat
+        || testRoofThreat
         || (roofDefender && roofThreat && !profile.testMode
           ? roofThreat
           : null)
@@ -7893,13 +7960,23 @@ function moveZoneDefender(
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
-      const targetX = roofDefender && roofThreat && !profile.testMode
+      const outsideLeverage = isOutsideDeepThird
+        ? zone.x < fieldWidth / 2 ? -22 : 22
+        : 0;
+      const outsideThirdMidpoint = isOutsideDeepThird
+        && nearbyVerticals.length > 1
+        && safetyMode === "midpoint";
+      const targetX = soloOutsideThirdThreat
+        ? selectedThreat.x + outsideLeverage
+        : roofDefender && roofThreat && !profile.testMode && !outsideThirdMidpoint
         ? roofThreat.x
         : safetyMode === "midpoint"
         ? splitX
         : selectedThreat.x + ((profile.leverageNoise || 0) * .25);
       const roofCushion = Math.max(profile.cushion + 16, 52);
-      const targetCushion = roofDefender
+      const targetCushion = soloOutsideThirdThreat
+        ? Math.max(roofCushion, 60)
+        : roofDefender
         ? roofCushion
         : safetyMode === "midpoint"
         ? profile.cushion
@@ -7919,8 +7996,11 @@ function moveZoneDefender(
         && safetyMode !== "midpoint"
         && !verticalHasDeclared
         && technique !== "matchVertical";
-      carryingDeepThreat = !lateSafety && !pedalFirst;
-      mode = roofDefender && !lateSafety
+      const outsideThirdCarry = Boolean(soloOutsideThirdThreat) && !lateSafety;
+      carryingDeepThreat = outsideThirdCarry || (!lateSafety && !pedalFirst);
+      mode = outsideThirdCarry
+        ? "carry"
+        : roofDefender && !lateSafety
         ? "midpoint"
         : lateSafety
         ? "recover"
@@ -7937,7 +8017,9 @@ function moveZoneDefender(
           : readLandmark.x + ((targetX - readLandmark.x) * (
             safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
           )),
-        y: safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
+        y: outsideThirdCarry
+          ? Math.min(deepThreatLine, selectedThreat.y - targetCushion)
+          : safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
           ? Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
           : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
@@ -8090,9 +8172,12 @@ function moveZoneDefender(
   if (!roofDefender && !carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     const roofCushion = roofDefender ? Math.max(profile.cushion + 18, 56) : profile.cushion;
-    if (roofDefender && roofThreat) {
+    const roofControlThreat = isOutsideDeepThird && assignedThreat
+      ? assignedThreat
+      : roofThreat;
+    if (roofDefender && roofControlThreat) {
       target.x = laneCapX(zone, target.x);
-      target.y = Math.min(target.y, roofThreat.y - roofCushion);
+      target.y = Math.min(target.y, roofControlThreat.y - roofCushion);
     }
     target.y = Math.min(target.y, roofDefender ? target.y : deepThreatLine);
     if (mode === "midpoint") target.y = Math.min(target.y, state.start.y);
@@ -8207,9 +8292,12 @@ function moveZoneDefender(
   state.y += proposedDy * frameRatio;
   state.x = Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, state.x));
   state.y = Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, state.y));
-  if (roofDefender && roofThreat && mode !== "bite" && mode !== "recover") {
+  const finalRoofThreat = isOutsideDeepThird && state.primaryThreatId
+    ? receiverCandidates.find(receiver => receiver.id === state.primaryThreatId) || roofThreat
+    : roofThreat;
+  if (roofDefender && finalRoofThreat && mode !== "bite" && mode !== "recover") {
     const roofCushion = Math.max(profile.cushion + 18, 56);
-    const maxRoofY = roofThreat.y - roofCushion;
+    const maxRoofY = finalRoofThreat.y - roofCushion;
     state.x = laneCapX(zone, state.x);
     if (state.y > maxRoofY) {
       state.y = maxRoofY;
