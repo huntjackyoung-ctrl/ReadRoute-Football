@@ -6487,6 +6487,28 @@ function deepZonePedalTarget(state, zone, readLandmark, elapsed = 0, roofDefende
   };
 }
 
+function laneCapX(zone, targetX, pad = 8) {
+  const radii = zoneRadii(zone);
+  return Math.max(zone.x - radii.x + pad, Math.min(zone.x + radii.x - pad, targetX));
+}
+
+function deepestRoofThreat(receivers, state, zone, roofDefender = false) {
+  const radii = zoneRadii(zone);
+  const lanePad = roofDefender ? 34 : 18;
+  const laneThreats = receivers.filter(receiver => {
+    const inLane = Math.abs(receiver.x - zone.x) <= radii.x + lanePad;
+    const deepEnough = receiver.read?.isVertical
+      || receiver.read?.routeDepth > 64
+      || receiver.y <= state.start.y + 64;
+    return inLane && deepEnough && receiver.vy < 32;
+  });
+  return laneThreats.sort((a, b) => {
+    const depthDiff = a.y - b.y;
+    if (Math.abs(depthDiff) > 12) return depthDiff;
+    return (b.read?.verticalSpeed || 0) - (a.read?.verticalSpeed || 0);
+  })[0] || null;
+}
+
 function postureEyeVector(state, posture, mode, target, gapX, gapY, context = {}) {
   const isDeepSafety = Boolean(context.isDeepSafety);
   if (mode === "backfield" || mode === "run-fit" || mode === "bite") {
@@ -7097,6 +7119,9 @@ function moveZoneDefender(
       return inZoneRange || visiblePull || findWorkPull;
     })
     .sort((a, b) => b.threatScore - a.threatScore);
+  const roofThreat = roofDefender
+    ? deepestRoofThreat(receiverCandidates, state, zone, roofDefender)
+    : null;
 
   let target = { ...state.start };
   let mode = "spot";
@@ -7108,6 +7133,15 @@ function moveZoneDefender(
   if (isDeepSafety && !runFitBite) {
     mode = "midpoint";
     target = deepZonePedalTarget(state, zone, readLandmark, elapsed, roofDefender);
+    if (roofDefender && roofThreat) {
+      const roofCushion = Math.max(profile.cushion + 18, 56);
+      target = {
+        x: laneCapX(zone, roofThreat.x),
+        y: Math.min(target.y, roofThreat.y - roofCushion)
+      };
+      state.primaryThreatId = roofThreat.id;
+      state.deepThreatId = roofThreat.id;
+    }
   } else if (elapsed > .55 && !threats.length) {
     target = {
       x: state.start.x + ((readLandmark.x - state.start.x) * .26),
@@ -7175,7 +7209,9 @@ function moveZoneDefender(
         technique,
         allVerticalsAlreadyClaimed
       );
-      const selectedThreat = safetyMode === "attach-left"
+      const selectedThreat = roofDefender && roofThreat
+        ? roofThreat
+        : safetyMode === "attach-left"
         ? leftmost
         : safetyMode === "attach-right"
           ? rightmost
@@ -7188,7 +7224,9 @@ function moveZoneDefender(
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
-      const targetX = safetyMode === "midpoint"
+      const targetX = roofDefender && roofThreat
+        ? roofThreat.x
+        : safetyMode === "midpoint"
         ? splitX
         : selectedThreat.x + ((profile.leverageNoise || 0) * .25);
       const roofCushion = Math.max(profile.cushion + 16, 52);
@@ -7213,7 +7251,9 @@ function moveZoneDefender(
         && !verticalHasDeclared
         && technique !== "matchVertical";
       carryingDeepThreat = !lateSafety && !pedalFirst;
-      mode = lateSafety
+      mode = roofDefender && !lateSafety
+        ? "midpoint"
+        : lateSafety
         ? "recover"
         : safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
           ? "midpoint"
@@ -7223,9 +7263,11 @@ function moveZoneDefender(
       const pedalDepth = (roofDefender ? 38 : 24) + Math.min(40, Math.max(0, state.start.y - selectedThreat.y) * (roofDefender ? .42 : .28));
       const pedalCapY = Math.min(state.start.y - pedalDepth, selectedThreat.y - Math.max(roofDefender ? 46 : 28, targetCushion * (roofDefender ? .95 : .82)));
       target = {
-        x: readLandmark.x + ((targetX - readLandmark.x) * (
-          safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
-        )),
+        x: roofDefender
+          ? laneCapX(zone, targetX)
+          : readLandmark.x + ((targetX - readLandmark.x) * (
+            safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
+          )),
         y: safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
           ? Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
           : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
@@ -7236,7 +7278,7 @@ function moveZoneDefender(
       );
     }
   }
-  if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
+  if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length && !roofDefender) {
     const roofThreats = roofDefender
       ? threats.filter(threat =>
           threat.read.isVertical
@@ -7350,7 +7392,12 @@ function moveZoneDefender(
     && (assignedThreat?.vision?.clear || assignedThreat?.findWorkPull);
   if (!roofDefender && !carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
-    target.y = Math.min(target.y, deepThreatLine);
+    const roofCushion = roofDefender ? Math.max(profile.cushion + 18, 56) : profile.cushion;
+    if (roofDefender && roofThreat) {
+      target.x = laneCapX(zone, target.x);
+      target.y = Math.min(target.y, roofThreat.y - roofCushion);
+    }
+    target.y = Math.min(target.y, roofDefender ? target.y : deepThreatLine);
     if (mode === "midpoint") target.y = Math.min(target.y, state.start.y);
   } else if (mode !== "carry" && mode !== "rally" && mode !== "run-fit") {
     const pullPad = pulledByVision ? .34 + ((1 - (profile.discipline || .7)) * .34) : 0;
@@ -7461,7 +7508,15 @@ function moveZoneDefender(
   state.y += proposedDy * frameRatio;
   state.x = Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, state.x));
   state.y = Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, state.y));
-  if (isDeepSafety && mode !== "bite" && state.y > deepThreatLine) {
+  if (roofDefender && roofThreat && mode !== "bite" && mode !== "recover") {
+    const roofCushion = Math.max(profile.cushion + 18, 56);
+    const maxRoofY = roofThreat.y - roofCushion;
+    state.x = laneCapX(zone, state.x);
+    if (state.y > maxRoofY) {
+      state.y = maxRoofY;
+      state.vy = Math.min(0, state.vy);
+    }
+  } else if (isDeepSafety && mode !== "bite" && state.y > deepThreatLine) {
     state.y = deepThreatLine;
     state.vy = Math.min(0, state.vy);
   }
