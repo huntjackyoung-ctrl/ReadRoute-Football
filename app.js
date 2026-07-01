@@ -6095,6 +6095,12 @@ els.field.addEventListener("pointermove", event => {
   renderRoutesAndPlayers();
 });
 
+els.field.addEventListener("pointerdown", event => {
+  if (handleTestReceiverThrowClick(event)) {
+    suppressFieldClickUntil = Date.now() + 250;
+  }
+}, true);
+
 els.field.addEventListener("click", event => {
   handleTestReceiverThrowClick(event);
 }, true);
