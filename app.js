@@ -6452,6 +6452,31 @@ function routeMovementEyeVector(current, start, route, elapsed, speed) {
   return movementFacingVector(current, gapX, gapY);
 }
 
+function deepRouteScanVector(state, receivers, readLandmark, elapsed, profile = {}) {
+  const routeThreats = receivers
+    .filter(receiver => receiver.y <= state.start.y + 105 && receiver.vy < 28)
+    .sort((a, b) => {
+      const depthDiff = a.y - b.y;
+      if (Math.abs(depthDiff) > 20) return depthDiff;
+      const aVertical = a.read?.isVertical ? 1 : 0;
+      const bVertical = b.read?.isVertical ? 1 : 0;
+      return bVertical - aVertical;
+    });
+  if (!routeThreats.length) {
+    const scanAmount = Math.sin(elapsed * .95 + (profile.scanNoise || 0)) * .22;
+    return rotateVector(ballFacingVector(state), scanAmount);
+  }
+  const primary = routeThreats[0];
+  if (routeThreats.length === 1) return vectorToward(state, primary);
+  const secondary = routeThreats[1];
+  const scan = (Math.sin(elapsed * 1.15 + (profile.scanNoise || 0)) + 1) / 2;
+  const scanWeight = .35 + (scan * .3);
+  return vectorToward(state, {
+    x: (primary.x * (1 - scanWeight)) + (secondary.x * scanWeight),
+    y: Math.min(primary.y, secondary.y) + 4
+  });
+}
+
 function postureEyeVector(state, posture, mode, target, gapX, gapY, context = {}) {
   const isDeepSafety = Boolean(context.isDeepSafety);
   if (mode === "backfield" || mode === "run-fit" || mode === "bite") {
@@ -6857,17 +6882,19 @@ function receiverVisionInfo(receiver, state, style, profile, influence, readLand
   const dy = receiver.y - state.y;
   const distance = Math.hypot(dx, dy) || 1;
   const dot = ((dx / distance) * facing.x) + ((dy / distance) * facing.y);
-  const baseCone = style.isDeepSafety ? .2 : style.isFlatDefender || style.isCurlFlat ? .08 : .02;
+  const baseCone = style.isDeepSafety ? -.05 : style.isFlatDefender || style.isCurlFlat ? .08 : .02;
   const awarenessBoost = ((profile.awareness || .7) - .5) * -.12;
-  const backfieldPenalty = influence?.backfieldRead ? .18 : 0;
-  const coneThreshold = Math.max(-.16, Math.min(.42, baseCone + awarenessBoost + backfieldPenalty));
+  const backfieldPenalty = influence?.backfieldRead
+    ? style.isDeepSafety ? .1 : .18
+    : 0;
+  const coneThreshold = Math.max(style.isDeepSafety ? -.32 : -.16, Math.min(.42, baseCone + awarenessBoost + backfieldPenalty));
   const read = receiver.read || receiverRouteRead(receiver);
   const eyeMode = profile.eyes || "balanced";
   let visibility = (dot - coneThreshold) / (1 - coneThreshold);
   if (eyeMode === "receiver" || eyeMode === "nearest") visibility += .14;
   if (eyeMode === "landmark") visibility += .04;
   if (eyeMode === "backfield") visibility -= .18;
-  if (read.isVertical && style.isDeepSafety) visibility += .1;
+  if (read.isVertical && style.isDeepSafety) visibility += .18;
   if (read.isFlat && (style.isFlatDefender || style.isCurlFlat)) visibility += .08;
   visibility = Math.max(0, Math.min(1, visibility));
   const peripheral = dot > coneThreshold - .22 && visibility < .42;
@@ -7304,9 +7331,14 @@ function moveZoneDefender(
       eyeMode = mode === "spot" ? "lean" : mode;
     }
   } else if (!threats.length && elapsed > reactionTime) {
-    const scanAmount = Math.sin(elapsed * (isDeepSafety ? .95 : 1.25) + (profile.scanNoise || 0)) * (isDeepSafety ? .16 : .2);
-    eyeFacing = rotateVector(ballFacingVector(state), scanAmount);
+    const scanAmount = Math.sin(elapsed * (isDeepSafety ? .95 : 1.25) + (profile.scanNoise || 0)) * (isDeepSafety ? .22 : .2);
+    eyeFacing = isDeepSafety
+      ? deepRouteScanVector(state, receiverCandidates, readLandmark, elapsed, profile)
+      : rotateVector(ballFacingVector(state), scanAmount);
     eyeMode = "scan";
+  }
+  if (isDeepSafety && (eyeMode === "midpoint" || eyeMode === "scan") && !influence.flatFoot && !influence.backfieldRead) {
+    eyeFacing = deepRouteScanVector(state, receiverCandidates, readLandmark, elapsed, profile);
   }
   setDefenderEyeState(
     state,
