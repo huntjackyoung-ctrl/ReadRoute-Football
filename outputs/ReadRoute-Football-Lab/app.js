@@ -269,6 +269,7 @@ let testSessionPlayIds = [];
 let testSessionIndex = -1;
 let testQbLookPoint = null;
 let testThrowState = null;
+let testThrowFrame = null;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let libraryPreviewContext = null;
@@ -3252,6 +3253,10 @@ function testEligiblePlays() {
 function resetTestInteraction() {
   testQbLookPoint = null;
   testThrowState = null;
+  if (testThrowFrame) {
+    cancelAnimationFrame(testThrowFrame);
+    testThrowFrame = null;
+  }
 }
 
 function currentTestQbLookPoint() {
@@ -3267,6 +3272,32 @@ function nearestDefendersTo(point) {
       distance: Math.hypot(defenderPoint.x - point.x, defenderPoint.y - point.y)
     }))
     .sort((a, b) => a.distance - b.distance);
+}
+
+function nearestTestReceiver(point, maxDistance = 42) {
+  return skillPositions
+    .map(position => {
+      const receiverPoint = animationState?.offense?.[position.id] || offensePosition(position.id);
+      return {
+        id: position.id,
+        distance: Math.hypot(receiverPoint.x - point.x, receiverPoint.y - point.y)
+      };
+    })
+    .filter(receiver => receiver.distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance)[0] || null;
+}
+
+function scheduleTestThrowRender() {
+  if (testThrowFrame) return;
+  const tick = () => {
+    renderRoutesAndPlayers();
+    if (testThrowState && !testThrowState.resolved) {
+      testThrowFrame = requestAnimationFrame(tick);
+    } else {
+      testThrowFrame = null;
+    }
+  };
+  testThrowFrame = requestAnimationFrame(tick);
 }
 
 function evaluateThrowOutcome(receiverId, targetPoint) {
@@ -3299,7 +3330,7 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
 }
 
 function startTestThrow(receiverId) {
-  if (appTab !== "test" || !testRoundReady || testAnswerRevealed || !animationPlayback) return;
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
   if (testThrowState && !testThrowState.resolved) return;
   const start = { ...(animationState?.offense?.QB || offensePosition("QB")) };
   const target = { ...(animationState?.offense?.[receiverId] || offensePosition(receiverId)) };
@@ -3316,6 +3347,7 @@ function startTestThrow(receiverId) {
   };
   els.testStatus.textContent = `Throwing to ${offenseLabel(receiverId)}...`;
   renderRoutesAndPlayers();
+  scheduleTestThrowRender();
 }
 
 function resetTestSession() {
@@ -4009,6 +4041,13 @@ function renderRoutesAndPlayers() {
       renderPlayControls();
       renderRoutesAndPlayers();
     });
+    if (appTab === "test" && testRoundReady && !testAnswerRevealed) {
+      group.append(svgEl("circle", {
+        r: 28,
+        fill: "transparent",
+        "pointer-events": "all"
+      }));
+    }
     group.append(svgEl("circle", {
       r: 18,
       fill: playerColor,
@@ -5992,6 +6031,15 @@ els.field.addEventListener("pointermove", event => {
 els.field.addEventListener("click", event => {
   if (Date.now() < suppressFieldClickUntil) {
     return;
+  }
+  if (appTab === "test" && testRoundReady && !testAnswerRevealed) {
+    const receiver = nearestTestReceiver(eventToFieldPoint(event));
+    if (receiver) {
+      event.preventDefault();
+      event.stopPropagation();
+      startTestThrow(receiver.id);
+      return;
+    }
   }
   if (appTab === "run" && scenarioEditing && scenarioTool === "zone"
     && activeRouteSide === "defense") {
@@ -8112,7 +8160,7 @@ function toggleRunPlayback() {
 }
 
 els.field.addEventListener("click", event => {
-  if (!animationPlayback || !isRunLikeMode()) return;
+  if (!animationPlayback || appTab !== "run") return;
   event.preventDefault();
   event.stopImmediatePropagation();
   toggleRunPlayback();
@@ -8205,10 +8253,7 @@ document.querySelector("#newTestRoundButton").addEventListener("click", loadNext
 
 function snapTestBall() {
   if (!testRoundReady) return;
-  if (animationPlayback?.paused) {
-    toggleRunPlayback();
-    return;
-  }
+  stopAnimationPlayback();
   resetTestInteraction();
   testAnswerRevealed = false;
   render();
@@ -8220,10 +8265,11 @@ document.querySelector("#runTestButton").addEventListener("click", snapTestBall)
 document.addEventListener("keydown", event => {
   if (event.code !== "Space" || appTab !== "test" || !testRoundReady) return;
   const target = event.target;
-  if (target && ["INPUT", "TEXTAREA", "SELECT", "BUTTON"].includes(target.tagName)) return;
+  if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
   event.preventDefault();
+  event.stopImmediatePropagation();
   snapTestBall();
-});
+}, true);
 
 document.querySelector("#resetTestButton").addEventListener("click", () => {
   if (!testRoundReady) return;
