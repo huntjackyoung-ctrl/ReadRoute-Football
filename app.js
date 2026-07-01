@@ -4095,6 +4095,23 @@ function rotateVector(vector, angle) {
   };
 }
 
+function vectorToward(from, to) {
+  return normalizeVector({
+    x: to.x - from.x,
+    y: to.y - from.y
+  });
+}
+
+function backfieldReadPoint() {
+  return { x: fieldWidth / 2, y: lineOfScrimmage + 34 };
+}
+
+function setDefenderEyeState(state, facing, targetId = "", mode = "landmark") {
+  state.facing = normalizeVector(facing);
+  state.eyeTargetId = targetId;
+  state.eyeMode = mode;
+}
+
 function animationElapsedSeconds() {
   if (!animationPlayback) return 0;
   return Math.max(
@@ -4104,9 +4121,9 @@ function animationElapsedSeconds() {
 }
 
 function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment, manTarget, route) {
-  if (!showDefenderFieldOfView || appTab === "test" && !testAnswerRevealed) return;
-  const hasAssignment = Boolean(zoneAssignment || manTarget || route.length);
-  if (!hasAssignment) return;
+  if (!showDefenderFieldOfView || (appTab === "test" && !testAnswerRevealed)) return;
+  if (!zoneAssignment && !manTarget) return;
+  const liveEyes = animationPlayback?.defenderEyes?.[id];
   const style = zoneAssignment
     ? zoneStyle(zoneAssignment, { start: defenderStarts[id] || playerPosition })
     : {
@@ -4115,28 +4132,20 @@ function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssign
         isCurlFlat: playerPosition.x < fieldWidth * .34 || playerPosition.x > fieldWidth * .66
       };
   const readLandmark = zoneAssignment
-    ? { x: zoneAssignment.x, y: zoneAssignment.y }
-    : manTarget
-      ? offensePosition(manTarget)
-      : (route.length ? route[0] : { x: fieldWidth / 2, y: lineOfScrimmage });
-  let facing = defenderFacingVector(
-    { ...playerPosition, start: defenderStarts[id] || playerPosition, primaryThreatId: null },
-    style,
-    { eyes: zoneAssignment ? "balanced" : "landmark" },
-    null,
-    readLandmark
-  );
-  if (manTarget) {
-    facing = normalizeVector({
-      x: readLandmark.x - playerPosition.x,
-      y: readLandmark.y - playerPosition.y
-    });
-  }
-  if (animationPlayback || appTab === "run") {
-    const scan = Math.sin((animationElapsedSeconds() * 2.4) + (Number(id.slice(1)) * .9));
-    const scanWidth = style.isDeepSafety ? .34 : .24;
-    facing = rotateVector(facing, scan * scanWidth);
-  }
+      ? { x: zoneAssignment.x, y: zoneAssignment.y }
+      : manTarget
+        ? offensePosition(manTarget)
+        : (route.length ? route[0] : { x: fieldWidth / 2, y: lineOfScrimmage });
+  let facing = liveEyes?.facing
+    ? normalizeVector(liveEyes.facing)
+    : defenderFacingVector(
+        { ...playerPosition, start: defenderStarts[id] || playerPosition, primaryThreatId: null, facing: null },
+        style,
+        { eyes: zoneAssignment ? "balanced" : "landmark" },
+        null,
+        readLandmark
+      );
+  if (!liveEyes?.facing && manTarget) facing = vectorToward(playerPosition, readLandmark);
   const length = style.isDeepSafety ? 230 : style.isFlatDefender || style.isCurlFlat ? 190 : 165;
   const cone = svgEl("path", {
     class: "defender-fov-cone",
@@ -6444,6 +6453,7 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   const safeDelta = Math.max(0, Math.min(.05, Number(deltaSeconds) || 0));
   const profile = state.profile || {};
   state.body ||= initializeBodyState("shuffle");
+  setDefenderEyeState(state, vectorToward(state, receiverPosition), receiverPosition.id || "", "man");
   const reactionVariance = profile.reaction ? profile.reaction * .35 : 0;
   const reactionTime = (state.initialCushion < 55 ? 0.09 : 0.14)
     + reactionVariance
@@ -6578,6 +6588,7 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   state.lastMode = state.phase;
   state.lastReceiver = { ...receiverPosition };
   if (receiverStep) state.lastDirection = { x: directionX, y: directionY };
+  setDefenderEyeState(state, vectorToward(state, receiverPosition), receiverPosition.id || "", `man-${state.phase}`);
   return { x: state.x, y: state.y };
 }
 
@@ -6773,41 +6784,25 @@ function confirmedReceiverRead(receiver, state, safeDelta) {
 }
 
 function defenderFacingVector(state, style, profile, influence, readLandmark) {
+  if (state.facing) return normalizeVector(state.facing);
   if (influence?.backfieldRead) {
-    const centerX = fieldWidth / 2;
-    const backfieldY = lineOfScrimmage + 34;
-    const dx = centerX - state.x;
-    const dy = backfieldY - state.y;
-    const length = Math.hypot(dx, dy) || 1;
-    return { x: dx / length, y: dy / length };
+    return vectorToward(state, backfieldReadPoint());
   }
   if (profile?.eyes === "landmark") {
-    const dx = readLandmark.x - state.x;
-    const dy = readLandmark.y - state.y;
-    const length = Math.hypot(dx, dy) || 1;
-    return { x: dx / length, y: dy / length };
+    return vectorToward(state, readLandmark);
   }
   if (state.primaryThreatId && state.lastSeenThreats?.[state.primaryThreatId]) {
     const threat = state.lastSeenThreats[state.primaryThreatId];
-    const dx = threat.x - state.x;
-    const dy = threat.y - state.y;
-    const length = Math.hypot(dx, dy) || 1;
-    return { x: dx / length, y: dy / length };
+    return vectorToward(state, threat);
   }
   if (style.isDeepSafety) {
-    const dx = fieldWidth / 2 - state.x;
-    const dy = lineOfScrimmage - state.y;
-    const length = Math.hypot(dx, dy) || 1;
-    return { x: dx / length, y: dy / length };
+    return vectorToward(state, { x: fieldWidth / 2, y: lineOfScrimmage });
   }
   if (style.isFlatDefender || style.isCurlFlat) {
     const outside = state.start.x < fieldWidth / 2 ? -1 : 1;
     return { x: outside * .45, y: .89 };
   }
-  const dx = fieldWidth / 2 - state.x;
-  const dy = lineOfScrimmage - state.y;
-  const length = Math.hypot(dx, dy) || 1;
-  return { x: dx / length, y: dy / length };
+  return vectorToward(state, { x: fieldWidth / 2, y: lineOfScrimmage });
 }
 
 function receiverVisionInfo(receiver, state, style, profile, influence, readLandmark) {
@@ -6858,7 +6853,13 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   score += (visionInfo.score - .5) * (style.isDeepSafety ? 34 : 28);
   if (visionInfo.clear) score += style.isDeepSafety ? 14 : 10;
   if (visionInfo.peripheral) score -= 10 * (profile.discipline || .7);
-  if (!visionInfo.visible && distance > 1) score -= 26 + ((profile.awareness || .7) * 12);
+  if (!visionInfo.visible) {
+    const blindPenalty = 18
+      + ((profile.awareness || .7) * 16)
+      + (distance > 1 ? 18 : 0)
+      - ((profile.mistakeRate || 0) * 8);
+    score -= blindPenalty;
+  }
   if (style.isDeepSafety) {
     score += Math.min(58, read.routeDepth * .18);
     score += read.isVertical ? 28 : 0;
@@ -7221,6 +7222,35 @@ function moveZoneDefender(
     target.y = Math.max(zone.y - radii.y * (.7 + pullPad), Math.min(zone.y + radii.y * (.7 + pullPad), target.y));
   }
 
+  let eyeTarget = readLandmark;
+  let eyeTargetId = "";
+  let eyeMode = mode;
+  let eyeApplied = false;
+  if (runFitBite || mode === "bite") {
+    eyeTarget = backfieldReadPoint();
+    eyeMode = "backfield";
+  } else if (state.primaryThreatId) {
+    const primaryEye = receiverCandidates.find(receiver => receiver.id === state.primaryThreatId)
+      || state.lastSeenThreats?.[state.primaryThreatId];
+    if (primaryEye) {
+      eyeTarget = primaryEye;
+      eyeTargetId = state.primaryThreatId;
+      eyeMode = mode === "spot" ? "lean" : mode;
+    }
+  } else if (!threats.length && elapsed > reactionTime) {
+    const baseScan = defenderFacingVector(
+      { ...state, facing: null, primaryThreatId: null },
+      style,
+      { ...profile, eyes: "landmark" },
+      null,
+      readLandmark
+    );
+    const scanAmount = Math.sin(elapsed * (isDeepSafety ? .95 : 1.25) + (profile.scanNoise || 0)) * (isDeepSafety ? .16 : .2);
+    setDefenderEyeState(state, rotateVector(baseScan, scanAmount), "", "scan");
+    eyeApplied = true;
+  }
+  if (!eyeApplied) setDefenderEyeState(state, vectorToward(state, eyeTarget), eyeTargetId, eyeMode);
+
   const gapX = target.x - state.x;
   const gapY = target.y - state.y;
   const separation = Math.hypot(gapX, gapY);
@@ -7470,6 +7500,7 @@ function previewMovement(scope) {
     pausedDuration: 0,
     startedAt,
     lastFrameAt: startedAt,
+    defenderEyes: {},
     receiverHistory: Object.fromEntries(
       skillPositions.map(position => [
         position.id,
@@ -7528,11 +7559,16 @@ function previewMovement(scope) {
         const defenderDelta = deltaSeconds * repTempo;
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
-          const targetPosition = animationState.offense[manTarget] || targetStart;
+          const targetPosition = { id: manTarget, ...(animationState.offense[manTarget] || targetStart) };
           if (postSnapElapsed < 0) {
             animationState.defense[id] = {
               x: start.x + (targetPosition.x - targetStart.x),
               y: start.y
+            };
+            animationPlayback.defenderEyes[id] = {
+              facing: vectorToward(animationState.defense[id], targetPosition),
+              mode: "motion-man",
+              targetId: manTarget
             };
             return;
           }
@@ -7540,6 +7576,11 @@ function previewMovement(scope) {
             animationState.defense[id] = {
               x: start.x + (targetPosition.x - targetStart.x),
               y: start.y
+            };
+            animationPlayback.defenderEyes[id] = {
+              facing: vectorToward(animationState.defense[id], targetPosition),
+              mode: "motion-man",
+              targetId: manTarget
             };
             return;
           }
@@ -7567,9 +7608,25 @@ function previewMovement(scope) {
             defenderElapsed,
             defenderDelta
           );
+          animationPlayback.defenderEyes[id] = {
+            facing: manState.facing,
+            mode: manState.eyeMode || "man",
+            targetId: manTarget
+          };
         } else if (zoneAssignment && postSnapElapsed >= 0) {
           if (defenderElapsed < 0) {
             animationState.defense[id] = { ...start };
+            animationPlayback.defenderEyes[id] = {
+              facing: defenderFacingVector(
+                { ...start, start, facing: null, primaryThreatId: null },
+                zoneStyle(zoneAssignment, { start }),
+                { eyes: "landmark" },
+                null,
+                zoneAssignment
+              ),
+              mode: "landmark",
+              targetId: ""
+            };
             return;
           }
           if (route.length && defenderElapsed < routeDuration) {
@@ -7579,6 +7636,17 @@ function previewMovement(scope) {
               defenderElapsed,
               baseSpeed * repTempo
             );
+            animationPlayback.defenderEyes[id] = {
+              facing: defenderFacingVector(
+                { ...animationState.defense[id], start, facing: null, primaryThreatId: null },
+                zoneStyle(zoneAssignment, { start }),
+                { eyes: "landmark" },
+                null,
+                zoneAssignment
+              ),
+              mode: "movement-landmark",
+              targetId: ""
+            };
             return;
           }
           const receivers = receiverSnapshots.map(receiver => ({
@@ -7605,6 +7673,11 @@ function previewMovement(scope) {
             coverageClaims,
             activePlayIntent
           );
+          animationPlayback.defenderEyes[id] = {
+            facing: zoneState.facing,
+            mode: zoneState.eyeMode || "zone",
+            targetId: zoneState.eyeTargetId || ""
+          };
         } else if (postSnapElapsed >= 0) {
           if (defenderElapsed < 0) {
             animationState.defense[id] = { ...start };
