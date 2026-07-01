@@ -6477,6 +6477,16 @@ function deepRouteScanVector(state, receivers, readLandmark, elapsed, profile = 
   });
 }
 
+function deepZonePedalTarget(state, zone, readLandmark, elapsed = 0, roofDefender = false) {
+  const radii = zoneRadii(zone);
+  const dropDepth = (roofDefender ? 42 : 30) + Math.min(28, elapsed * 28);
+  const zoneCap = zone.y + (radii.y * .18);
+  return {
+    x: state.start.x + ((readLandmark.x - state.start.x) * (roofDefender ? .32 : .24)),
+    y: Math.min(state.start.y - dropDepth, zoneCap)
+  };
+}
+
 function postureEyeVector(state, posture, mode, target, gapX, gapY, context = {}) {
   const isDeepSafety = Boolean(context.isDeepSafety);
   if (mode === "backfield" || mode === "run-fit" || mode === "bite") {
@@ -7095,7 +7105,10 @@ function moveZoneDefender(
     && state.start.y > lineOfScrimmage - 190
     && state.start.y < lineOfScrimmage - 65;
   const runFitBite = influence.runBite && isLinebackerLevel && elapsed < reactionTime + .46;
-  if (elapsed > .55 && !threats.length) {
+  if (isDeepSafety && !runFitBite) {
+    mode = "midpoint";
+    target = deepZonePedalTarget(state, zone, readLandmark, elapsed, roofDefender);
+  } else if (elapsed > .55 && !threats.length) {
     target = {
       x: state.start.x + ((readLandmark.x - state.start.x) * .26),
       y: state.start.y + ((readLandmark.y - state.start.y) * (isDeepSafety ? .1 : .24))
@@ -7525,8 +7538,11 @@ function previewMovement(scope) {
         const manTargetStart = editorOffensePositions()[manTarget] || start;
         const zoneAssignment = currentZoneAssignments()[id];
         const technique = normalizeDefenderTechnique(currentDefenderTechniques()[id]);
+        const assignmentStyle = zoneAssignment
+          ? zoneStyle(zoneAssignment, { start })
+          : null;
         const repDelay = scope === "run" || scope === "test"
-          ? Math.random() * .28
+          ? assignmentStyle?.isDeepSafety ? 0 : Math.random() * .28
           : 0;
         const repTempo = scope === "run" || scope === "test"
           ? .82 + (Math.random() * .34)
@@ -7586,7 +7602,7 @@ function previewMovement(scope) {
             vy: 0,
             start: zoneStart,
             technique,
-            body: initializeBodyState(zoneStart.y < lineOfScrimmage - 190 ? "backpedal" : "shuffle"),
+            body: initializeBodyState(assignmentStyle?.isDeepSafety ? "backpedal" : "shuffle"),
             profile: createDefenderAiProfile(
               zoneStart,
               zoneAssignment,
