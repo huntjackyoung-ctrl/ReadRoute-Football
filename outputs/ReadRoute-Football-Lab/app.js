@@ -7169,12 +7169,14 @@ function moveZoneDefender(
           : "carry";
       state.deepThreatId = selectedThreat.id;
       state.primaryThreatId = selectedThreat.id;
+      const pedalDepth = 24 + Math.min(32, Math.max(0, state.start.y - selectedThreat.y) * .28);
+      const pedalCapY = Math.min(state.start.y - pedalDepth, selectedThreat.y - Math.max(28, targetCushion * .82));
       target = {
         x: readLandmark.x + ((targetX - readLandmark.x) * (
           safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
         )),
         y: safetyMode === "midpoint" || frozenEyes || pedalFirst
-          ? Math.min(state.start.y, deepThreatLine)
+          ? Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
           : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
       coverageClaims.set(
@@ -7207,13 +7209,15 @@ function moveZoneDefender(
         || elapsed > reactionTime + .72;
       const pedalFirst = attach && !verticalHasDeclared && technique !== "matchVertical";
       mode = attach && !pedalFirst ? "carry" : "midpoint";
+      const pedalDepth = 24 + Math.min(32, Math.max(0, state.start.y - primary.y) * .28);
+      const pedalCapY = Math.min(state.start.y - pedalDepth, primary.y - Math.max(28, profile.cushion * .74));
       target = {
         x: attach && !pedalFirst
           ? primary.x + ((profile.leverageNoise || 0) * .2)
           : readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
         y: attach && !pedalFirst
           ? Math.min(deepThreatLine, primary.y - profile.cushion)
-          : Math.min(state.start.y, deepThreatLine)
+          : Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
       };
     } else {
       const shouldRallyFlat = (isFlatDefender || isCurlFlat)
@@ -7326,6 +7330,8 @@ function moveZoneDefender(
     ? 1
     : mode === "run-fit"
       ? .86
+      : isDeepSafety && (mode === "midpoint" || nextPosture === "backpedal")
+        ? .92
       : gapY < -8
         ? .68
         : Math.abs(gapX) > Math.abs(gapY) * 1.2
@@ -7337,7 +7343,7 @@ function moveZoneDefender(
       : mode === "run-fit" ? 108
       : mode === "rally" ? 120
         : mode === "wall" ? 104
-          : isDeepSafety ? 72
+          : isDeepSafety ? 98
             : isFlatDefender ? 92
               : 86
   ) * speedBoost * movementMultiplier * bodyProfile.speed * traffic;
@@ -7355,7 +7361,7 @@ function moveZoneDefender(
       : mode === "run-fit" ? 520
       : mode === "rally" ? 540
         : mode === "wall" ? 500
-          : isDeepSafety ? 320
+          : isDeepSafety ? 440
             : 420
   ) * speedBoost * movementMultiplier * bodyProfile.accel * traffic;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
