@@ -2819,6 +2819,11 @@ select:focus,
   filter: drop-shadow(0 0 10px rgba(201,255,74,.95));
 }
 
+.defender-fov-cone {
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
 .selection-ring {
   stroke: var(--lime);
   stroke-width: 4;
@@ -2984,6 +2989,50 @@ select:focus,
 option {
   color: #ecf8f0;
   background: #07140f;
+}
+
+.play-intent-card {
+  margin: 10px 0 12px;
+  padding: 10px;
+  border-radius: 13px;
+}
+
+.play-intent-card .eyebrow {
+  margin-bottom: 8px;
+  padding-bottom: 7px;
+  border-bottom: 1px solid rgba(201,255,74,.1);
+  font-size: 8px;
+  letter-spacing: .18em;
+}
+
+.play-intent-card .toggle-row {
+  min-height: 30px;
+  margin: 0;
+  padding: 6px 7px;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  gap: 8px;
+  align-items: center;
+  border-radius: 9px;
+  color: #eefbf3;
+  font-size: 10px;
+  line-height: 1.15;
+}
+
+.play-intent-card .toggle-row + .toggle-row {
+  margin-top: 4px;
+}
+
+.play-intent-card .toggle-row:hover {
+  background: rgba(201,255,74,.08);
+}
+
+.play-intent-card .toggle-row input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  justify-self: center;
+  accent-color: var(--lime);
 }
 
 @media (max-width: 1100px) {

@@ -280,6 +280,7 @@ let lastSavedSignature = "";
 let cloudAccessRole = "owner";
 let fieldStandard = localStorage.getItem("readroute-field-standard") || "highSchool";
 if (!fieldStandards[fieldStandard]) fieldStandard = "highSchool";
+let showDefenderFieldOfView = localStorage.getItem("readroute-show-defender-fov") === "true";
 
 const els = {
   playName: document.querySelector("#playName"),
@@ -329,6 +330,7 @@ const els = {
   activeRouteLabel: document.querySelector("#activeRouteLabel"),
   boardModeStatus: document.querySelector("#boardModeStatus"),
   routeHelp: document.querySelector("#routeHelp"),
+  fieldOfViewToggle: document.querySelector("#fieldOfViewToggle"),
   field: document.querySelector("#field"),
   fieldCard: document.querySelector(".field-card"),
   fieldStandardSelect: document.querySelector("#fieldStandardSelect"),
@@ -4064,6 +4066,53 @@ function renderRoutesAndPlayers() {
 let defenderRenderIndex = 0;
 let defenderStarts = {};
 
+function defenderVisionConePath(origin, facing, length = 185, halfAngle = Math.PI / 5.2) {
+  const baseAngle = Math.atan2(facing.y, facing.x);
+  const left = baseAngle - halfAngle;
+  const right = baseAngle + halfAngle;
+  const leftPoint = {
+    x: origin.x + (Math.cos(left) * length),
+    y: origin.y + (Math.sin(left) * length)
+  };
+  const rightPoint = {
+    x: origin.x + (Math.cos(right) * length),
+    y: origin.y + (Math.sin(right) * length)
+  };
+  return `M ${origin.x} ${origin.y} L ${leftPoint.x} ${leftPoint.y} A ${length} ${length} 0 0 1 ${rightPoint.x} ${rightPoint.y} Z`;
+}
+
+function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment) {
+  if (!showDefenderFieldOfView || appTab === "test" && !testAnswerRevealed) return;
+  const style = zoneAssignment
+    ? zoneStyle(zoneAssignment, { start: defenderStarts[id] || playerPosition })
+    : {
+        isDeepSafety: playerPosition.y < lineOfScrimmage - 190,
+        isFlatDefender: playerPosition.y > lineOfScrimmage - 110,
+        isCurlFlat: playerPosition.x < fieldWidth * .34 || playerPosition.x > fieldWidth * .66
+      };
+  const readLandmark = zoneAssignment
+    ? { x: zoneAssignment.x, y: zoneAssignment.y }
+    : { x: playerPosition.x, y: Math.max(fieldPadding, playerPosition.y - 100) };
+  const facing = defenderFacingVector(
+    { ...playerPosition, start: defenderStarts[id] || playerPosition, primaryThreatId: null },
+    style,
+    { eyes: "balanced" },
+    null,
+    readLandmark
+  );
+  const length = style.isDeepSafety ? 230 : style.isFlatDefender || style.isCurlFlat ? 190 : 165;
+  const cone = svgEl("path", {
+    class: "defender-fov-cone",
+    d: defenderVisionConePath(playerPosition, facing, length),
+    fill: rgba(defenderColor, .12),
+    stroke: defenderColor,
+    "stroke-width": 2,
+    "stroke-dasharray": "7 8",
+    opacity: .62
+  });
+  els.zones.append(cone);
+}
+
 function defender(x, y, label = "") {
   const id = `D${defenderRenderIndex}`;
   defenderRenderIndex += 1;
@@ -4185,6 +4234,7 @@ function defender(x, y, label = "") {
       opacity: appTab === "run" ? .42 : .8
     });
   }
+  appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment);
   const isSelected = (appTab === "create" || scenarioEditing) && activeRouteSide === "defense" && activeRouteId === id;
   const group = svgEl("g", { transform: `translate(${playerPosition.x} ${playerPosition.y})`, filter: "url(#shadow)" });
   makeMovable(group, "defense", id);
@@ -5471,6 +5521,11 @@ function render() {
   document.querySelector("#previewMovementButton").textContent = createScreen === "defense"
     ? "Preview Defense"
     : "Preview Play";
+  if (els.fieldOfViewToggle) {
+    els.fieldOfViewToggle.classList.toggle("active", showDefenderFieldOfView);
+    els.fieldOfViewToggle.setAttribute("aria-pressed", showDefenderFieldOfView ? "true" : "false");
+    els.fieldOfViewToggle.textContent = showDefenderFieldOfView ? "FOV On" : "FOV Off";
+  }
   els.fieldStandardSelect.value = fieldStandard;
   const screenCopy = {
     formation: ["Formation", "Create formation"],
@@ -6015,6 +6070,13 @@ document.querySelector("#toggleDefenseAlignmentsButton").addEventListener("click
   renderPlayControls();
   render();
   showSaveSuccess("Formation alignments saved");
+});
+
+els.fieldOfViewToggle?.addEventListener("click", () => {
+  showDefenderFieldOfView = !showDefenderFieldOfView;
+  localStorage.setItem("readroute-show-defender-fov", showDefenderFieldOfView ? "true" : "false");
+  renderPlayControls();
+  renderDefense();
 });
 
 els.defenseAlignmentFormationSelect.addEventListener("change", event => {
