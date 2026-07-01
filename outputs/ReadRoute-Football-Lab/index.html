@@ -395,6 +395,14 @@
               <input id="zoneSizeRange" type="range" min="40" max="300" step="5" value="130">
               <input id="zoneSizeInput" type="number" min="40" max="300" step="5" value="130" aria-label="Zone size number">
             </div>
+            <label for="zoneTypeSelect">Zone type</label>
+            <select id="zoneTypeSelect" class="zone-type-select">
+              <option value="deep">Deep zone</option>
+              <option value="hookCurl">Hook curl</option>
+              <option value="mid">Mid zone</option>
+              <option value="flat">Flat</option>
+              <option value="seamFlat">Seam flat</option>
+            </select>
             <p class="zone-resize-help">Drag the points on the top, bottom, left, and right to shape the selected zone.</p>
           </div>
           <p id="defensePathHelp">Select a defender, then draw movement or assign the offensive player they guard.</p>

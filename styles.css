@@ -1855,6 +1855,16 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   padding: 8px 9px;
   text-align: center;
 }
+.zone-type-select {
+  width: 100%;
+  margin-top: 7px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  color: var(--ink);
+  font-weight: 850;
+}
 .zone-resize-help {
   margin: 7px 0 0;
   color: var(--muted);
