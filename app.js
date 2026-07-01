@@ -3424,13 +3424,39 @@ function shouldDefenderBreakOnThrow(id, current, landingPoint, qbPoint) {
 }
 
 function breakDefenderOnThrow(id, current, landingPoint, deltaSeconds, urgency = 1) {
+  if (!testThrowState) return current;
+  testThrowState.breakStates ||= {};
+  const state = testThrowState.breakStates[id] ||= {
+    vx: 0,
+    vy: 0,
+    reaction: .08 + (Math.random() * .18),
+    elapsed: 0
+  };
+  const safeDelta = Math.max(.008, Math.min(.05, deltaSeconds));
+  state.elapsed += safeDelta;
+  if (state.elapsed < state.reaction) return { ...current };
   const direction = vectorToward(current, landingPoint);
   const distance = Math.hypot(landingPoint.x - current.x, landingPoint.y - current.y);
-  const breakSpeed = Math.min(260, 145 + (distance * .4)) * urgency;
-  const step = Math.min(distance, breakSpeed * Math.max(.008, deltaSeconds));
+  const receiverTopSpeed = 115;
+  const maxSpeed = receiverTopSpeed * urgency;
+  const desiredVx = direction.x * maxSpeed;
+  const desiredVy = direction.y * maxSpeed;
+  const acceleration = 430 * urgency;
+  const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
+  const maxVelocityChange = acceleration * safeDelta;
+  const velocityRatio = velocityChange
+    ? Math.min(1, maxVelocityChange / velocityChange)
+    : 0;
+  state.vx += (desiredVx - state.vx) * velocityRatio;
+  state.vy += (desiredVy - state.vy) * velocityRatio;
+  const proposedDx = state.vx * safeDelta;
+  const proposedDy = state.vy * safeDelta;
+  const proposedDistance = Math.hypot(proposedDx, proposedDy);
+  const frameDistance = Math.min(distance, proposedDistance);
+  const frameRatio = proposedDistance ? frameDistance / proposedDistance : 0;
   return {
-    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (direction.x * step))),
-    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, current.y + (direction.y * step)))
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (proposedDx * frameRatio))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, current.y + (proposedDy * frameRatio)))
   };
 }
 
