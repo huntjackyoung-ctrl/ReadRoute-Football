@@ -3320,7 +3320,7 @@ function scheduleTestThrowRender() {
       resolveTestCatchTackle();
     }
     renderRoutesAndPlayers();
-    if ((testThrowState && !testThrowState.resolved) || completedTestCatchActive()) {
+    if (!testPlayDead() && ((testThrowState && !testThrowState.resolved) || completedTestCatchActive())) {
       testThrowFrame = requestAnimationFrame(tick);
     } else {
       testThrowFrame = null;
@@ -3349,7 +3349,28 @@ function advanceTestCatchRun(deltaSeconds) {
   };
   testThrowState.catchRun.current = next;
   animationState.offense[id] = next;
+  if (next.y <= fieldPadding + 3) {
+    testPlayResult = {
+      dead: true,
+      label: "Touchdown",
+      point: { ...next },
+      className: "complete"
+    };
+    els.testStatus.textContent = `${offenseLabel(id)} scores a touchdown.`;
+    return false;
+  }
   return !resolveTestCatchTackle(next) && next.y > fieldPadding + 3;
+}
+
+function markTestThrowDead(outcome, point) {
+  if (!outcome || outcome.className === "complete") return;
+  testPlayResult = {
+    dead: true,
+    label: outcome.label,
+    point: { ...point },
+    className: outcome.className || "breakup",
+    defenderId: outcome.defenderId || ""
+  };
 }
 
 function resolveTestCatchTackle(ballPoint = testThrowState?.catchRun?.current) {
@@ -3418,7 +3439,7 @@ function resolveTestQbSack(defenderId) {
   const qbPoint = animationState?.offense?.QB || offensePosition("QB");
   testPlayResult = {
     dead: true,
-    label: "Sack",
+    label: "Sacked",
     point: { ...qbPoint },
     className: "interception",
     defenderId
@@ -3429,10 +3450,25 @@ function resolveTestQbSack(defenderId) {
 }
 
 function rushDefenderToQb(id, current, qbPoint, deltaSeconds, blocked = true) {
+  if (blocked) {
+    const labelHash = [...String(id)].reduce((total, char) => total + char.charCodeAt(0), 0);
+    const time = performance.now() / 1000;
+    const target = {
+      x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (Math.sin(time * 5.2 + labelHash) * 3.2))),
+      y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, Math.min(lineOfScrimmage - 8, current.y + (Math.cos(time * 4.3 + labelHash) * 1.8))))
+    };
+    const direction = vectorToward(current, target);
+    const distance = Math.hypot(target.x - current.x, target.y - current.y);
+    const step = Math.min(distance, 42 * Math.max(.008, deltaSeconds));
+    return {
+      x: current.x + (direction.x * step),
+      y: current.y + (direction.y * step)
+    };
+  }
   const direction = vectorToward(current, qbPoint);
   const distance = Math.hypot(qbPoint.x - current.x, qbPoint.y - current.y);
-  const pocketWall = blocked ? 46 : 16;
-  const rushSpeed = blocked ? 62 : 180;
+  const pocketWall = 16;
+  const rushSpeed = 210;
   const step = Math.min(Math.max(0, distance - pocketWall), rushSpeed * Math.max(.008, deltaSeconds));
   return {
     x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (direction.x * step))),
@@ -4107,6 +4143,7 @@ function renderTestInteractionOverlay() {
   if (progress >= 1 && !testThrowState.resolved) {
     testThrowState.target = { ...liveTarget };
     testThrowState.outcome = evaluateThrowOutcome(testThrowState.receiverId, liveTarget);
+    markTestThrowDead(testThrowState.outcome, liveTarget);
     if (!testThrowState.receiverId && testThrowState.outcome.receiverId) {
       testThrowState.receiverId = testThrowState.outcome.receiverId;
       testThrowState.targetMode = "receiver";
@@ -7270,6 +7307,7 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     zonePriority: Math.max(.55, Math.min(1, .62 + (discipline * .22) + (awareness * .18) - (mistakes * .16) + (Math.random() * .08))),
     assignmentMistake: Math.random() < Math.max(.015, Math.min(.32, (mistakes * .32) + ((1 - discipline) * .08))),
     routePrioritySeed: Math.random(),
+    repSalt: Math.random(),
     landmarkX: (Math.random() - .5) * 42,
     landmarkY: (Math.random() - .5) * 26,
     leverageNoise: (Math.random() - .5) * 34,
@@ -7327,18 +7365,45 @@ function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp, technique =
 
 function chooseCloseThreat(threats, profile, influence, spread = 28) {
   if (!threats.length) return null;
-  const window = spread + ((profile.mistakeRate || 0) * 32) + ((1 - (profile.awareness || .7)) * 18);
+  const testMode = Boolean(profile.testMode);
+  if (testMode) {
+    const inZoneThreats = threats.filter(threat =>
+      threat.zoneDistance <= (threat.read?.isVertical ? 1.6 : 1.38)
+    );
+    if (inZoneThreats.length > 1) {
+      const playableThreats = inZoneThreats.filter(threat =>
+        inZoneThreats[0].threatScore - threat.threatScore <= 135
+      );
+      const pool = playableThreats.length > 1 ? playableThreats : inZoneThreats;
+      const index = Math.floor((profile.repSalt || Math.random()) * pool.length) % pool.length;
+      return pool[index];
+    }
+  }
+  const window = spread
+    + ((profile.mistakeRate || 0) * (testMode ? 22 : 32))
+    + ((1 - (profile.awareness || .7)) * (testMode ? 12 : 18))
+    + (testMode ? 10 : 0);
   const closeThreats = threats.filter(threat =>
     threats[0].threatScore - threat.threatScore <= window
   );
   if (closeThreats.length <= 1) return threats[0];
+  const inZoneCloseThreats = closeThreats.filter(threat =>
+    threat.zoneDistance <= (threat.read?.isVertical ? 1.55 : 1.35)
+  );
+  const choicePool = testMode && inZoneCloseThreats.length > 1
+    ? inZoneCloseThreats
+    : closeThreats;
   const shouldVary = influence.wrongChoice
     || (profile.choiceNoise || 0) < .55
     || (profile.personality === "aggressive" && (profile.jumpShort || 0) < .62);
   if (!shouldVary) return threats[0];
-  const index = Math.floor(((profile.choiceNoise || 0) * 1009) + ((profile.safetyChoice || 0) * 97))
-    % closeThreats.length;
-  return closeThreats[index];
+  const index = Math.floor(
+    ((profile.choiceNoise || 0) * 1009)
+    + ((profile.safetyChoice || 0) * 97)
+    + ((profile.routePrioritySeed || 0) * 193)
+    + ((profile.repSalt || 0) * 389)
+  ) % choicePool.length;
+  return choicePool[index];
 }
 
 function committedThreat(threats, state, profile, influence, elapsed, spread = 28) {
@@ -7763,9 +7828,19 @@ function moveZoneDefender(
         technique,
         allVerticalsAlreadyClaimed
       );
-      const selectedThreat = roofDefender && roofThreat
-        ? roofThreat
-        : safetyMode === "attach-left"
+      const testRoofPool = profile.testMode && roofDefender && nearbyVerticals.length > 1
+        ? nearbyVerticals.filter(receiver =>
+            nearbyVerticals[0].threatScore - receiver.threatScore <= 140
+          )
+        : [];
+      const testRoofThreat = testRoofPool.length > 1
+        ? testRoofPool[Math.floor((profile.repSalt || Math.random()) * testRoofPool.length) % testRoofPool.length]
+        : null;
+      const selectedThreat = testRoofThreat
+        || (roofDefender && roofThreat && !profile.testMode
+          ? roofThreat
+          : null)
+        || (safetyMode === "attach-left"
         ? leftmost
         : safetyMode === "attach-right"
           ? rightmost
@@ -7774,11 +7849,11 @@ function moveZoneDefender(
                 Math.abs(receiver.x - state.x) < Math.abs(nearest.x - state.x)
                   ? receiver
                   : nearest, deepestThreat)
-            : unclaimedVerticals[0] || deepestThreat;
+            : unclaimedVerticals[0] || deepestThreat);
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
-      const targetX = roofDefender && roofThreat
+      const targetX = roofDefender && roofThreat && !profile.testMode
         ? roofThreat.x
         : safetyMode === "midpoint"
         ? splitX
@@ -8371,8 +8446,8 @@ function previewMovement(scope) {
           const sackNow = postSnapElapsed >= passRushDelay;
           const rushed = rushDefenderToQb(id, current, qbPoint, defenderDelta, !sackNow);
           animationState.defense[id] = sackNow ? {
-            x: (rushed.x + qbPoint.x) / 2,
-            y: (rushed.y + qbPoint.y) / 2
+            x: qbPoint.x + ((start.x < qbPoint.x ? -1 : 1) * 14),
+            y: qbPoint.y - 4
           } : rushed;
           animationPlayback.defenderEyes[id] = {
             facing: vectorToward(animationState.defense[id], qbPoint),
