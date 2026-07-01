@@ -4081,8 +4081,32 @@ function defenderVisionConePath(origin, facing, length = 185, halfAngle = Math.P
   return `M ${origin.x} ${origin.y} L ${leftPoint.x} ${leftPoint.y} A ${length} ${length} 0 0 1 ${rightPoint.x} ${rightPoint.y} Z`;
 }
 
-function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment) {
+function normalizeVector(vector) {
+  const length = Math.hypot(vector.x, vector.y) || 1;
+  return { x: vector.x / length, y: vector.y / length };
+}
+
+function rotateVector(vector, angle) {
+  const cos = Math.cos(angle);
+  const sin = Math.sin(angle);
+  return {
+    x: (vector.x * cos) - (vector.y * sin),
+    y: (vector.x * sin) + (vector.y * cos)
+  };
+}
+
+function animationElapsedSeconds() {
+  if (!animationPlayback) return 0;
+  return Math.max(
+    0,
+    ((performance.now() - animationPlayback.startedAt - animationPlayback.pausedDuration) / 1000) * (runSpeed || 1)
+  );
+}
+
+function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment, manTarget, route) {
   if (!showDefenderFieldOfView || appTab === "test" && !testAnswerRevealed) return;
+  const hasAssignment = Boolean(zoneAssignment || manTarget || route.length);
+  if (!hasAssignment) return;
   const style = zoneAssignment
     ? zoneStyle(zoneAssignment, { start: defenderStarts[id] || playerPosition })
     : {
@@ -4092,14 +4116,27 @@ function appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssign
       };
   const readLandmark = zoneAssignment
     ? { x: zoneAssignment.x, y: zoneAssignment.y }
-    : { x: playerPosition.x, y: Math.max(fieldPadding, playerPosition.y - 100) };
-  const facing = defenderFacingVector(
+    : manTarget
+      ? offensePosition(manTarget)
+      : (route.length ? route[0] : { x: fieldWidth / 2, y: lineOfScrimmage });
+  let facing = defenderFacingVector(
     { ...playerPosition, start: defenderStarts[id] || playerPosition, primaryThreatId: null },
     style,
-    { eyes: "balanced" },
+    { eyes: zoneAssignment ? "balanced" : "landmark" },
     null,
     readLandmark
   );
+  if (manTarget) {
+    facing = normalizeVector({
+      x: readLandmark.x - playerPosition.x,
+      y: readLandmark.y - playerPosition.y
+    });
+  }
+  if (animationPlayback || appTab === "run") {
+    const scan = Math.sin((animationElapsedSeconds() * 2.4) + (Number(id.slice(1)) * .9));
+    const scanWidth = style.isDeepSafety ? .34 : .24;
+    facing = rotateVector(facing, scan * scanWidth);
+  }
   const length = style.isDeepSafety ? 230 : style.isFlatDefender || style.isCurlFlat ? 190 : 165;
   const cone = svgEl("path", {
     class: "defender-fov-cone",
@@ -4234,7 +4271,7 @@ function defender(x, y, label = "") {
       opacity: appTab === "run" ? .42 : .8
     });
   }
-  appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment);
+  appendDefenderFieldOfView(id, playerPosition, defenderColor, zoneAssignment, manTarget, route);
   const isSelected = (appTab === "create" || scenarioEditing) && activeRouteSide === "defense" && activeRouteId === id;
   const group = svgEl("g", { transform: `translate(${playerPosition.x} ${playerPosition.y})`, filter: "url(#shadow)" });
   makeMovable(group, "defense", id);
@@ -6757,12 +6794,20 @@ function defenderFacingVector(state, style, profile, influence, readLandmark) {
     const length = Math.hypot(dx, dy) || 1;
     return { x: dx / length, y: dy / length };
   }
-  if (style.isDeepSafety) return { x: 0, y: -1 };
+  if (style.isDeepSafety) {
+    const dx = fieldWidth / 2 - state.x;
+    const dy = lineOfScrimmage - state.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
   if (style.isFlatDefender || style.isCurlFlat) {
     const outside = state.start.x < fieldWidth / 2 ? -1 : 1;
-    return { x: outside * .55, y: -.83 };
+    return { x: outside * .45, y: .89 };
   }
-  return { x: 0, y: -1 };
+  const dx = fieldWidth / 2 - state.x;
+  const dy = lineOfScrimmage - state.y;
+  const length = Math.hypot(dx, dy) || 1;
+  return { x: dx / length, y: dy / length };
 }
 
 function receiverVisionInfo(receiver, state, style, profile, influence, readLandmark) {
