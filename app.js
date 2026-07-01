@@ -3291,22 +3291,25 @@ function nearestTestReceiver(point, maxDistance = 62) {
     .sort((a, b) => a.distance - b.distance)[0] || null;
 }
 
-function handleTestReceiverThrowClick(event) {
+function handleTestThrowPointer(event) {
   if (!testThrowActive()) return false;
-  const receiver = nearestTestReceiver(eventToFieldPoint(event));
-  if (!receiver) return false;
+  const point = eventToFieldPoint(event);
+  const receiver = nearestTestReceiver(point);
   event.preventDefault();
   event.stopPropagation();
   event.stopImmediatePropagation?.();
-  startTestThrow(receiver.id);
+  startTestThrow(receiver?.id || null, receiver ? null : point);
   return true;
 }
 
 function scheduleTestThrowRender() {
   if (testThrowFrame) return;
   const tick = () => {
+    if (!animationPlayback && completedTestCatchActive()) {
+      advanceTestCatchRun(1 / 60);
+    }
     renderRoutesAndPlayers();
-    if (testThrowState && !testThrowState.resolved) {
+    if ((testThrowState && !testThrowState.resolved) || completedTestCatchActive()) {
       testThrowFrame = requestAnimationFrame(tick);
     } else {
       testThrowFrame = null;
@@ -3315,8 +3318,46 @@ function scheduleTestThrowRender() {
   testThrowFrame = requestAnimationFrame(tick);
 }
 
+function completedTestCatchActive() {
+  if (appTab !== "test" || !testThrowState?.resolved) return false;
+  return testThrowState.outcome?.className === "complete"
+    && (testThrowState.catchRun?.current?.y ?? fieldHeight) > fieldPadding + 3;
+}
+
+function advanceTestCatchRun(deltaSeconds) {
+  if (!completedTestCatchActive()) return false;
+  animationState ||= { offense: {}, defense: {} };
+  const id = testThrowState.receiverId;
+  const current = testThrowState.catchRun.current
+    || animationState.offense[id]
+    || offensePosition(id);
+  const next = {
+    ...current,
+    y: Math.max(fieldPadding, current.y - (165 * Math.max(0, deltaSeconds)))
+  };
+  testThrowState.catchRun.current = next;
+  animationState.offense[id] = next;
+  return next.y > fieldPadding + 3;
+}
+
+function nearestCatchableReceiver(targetPoint, maxDistance = 36) {
+  return skillPositions
+    .map(position => {
+      const receiverPoint = animationState?.offense?.[position.id] || offensePosition(position.id);
+      return {
+        id: position.id,
+        point: receiverPoint,
+        distance: Math.hypot(receiverPoint.x - targetPoint.x, receiverPoint.y - targetPoint.y)
+      };
+    })
+    .filter(receiver => receiver.distance <= maxDistance)
+    .sort((a, b) => a.distance - b.distance)[0] || null;
+}
+
 function evaluateThrowOutcome(receiverId, targetPoint) {
-  const receiverPoint = animationState?.offense?.[receiverId] || offensePosition(receiverId);
+  const catchTarget = receiverId
+    ? { id: receiverId, point: animationState?.offense?.[receiverId] || offensePosition(receiverId), distance: 0 }
+    : nearestCatchableReceiver(targetPoint);
   const defenders = nearestDefendersTo(targetPoint);
   const nearest = defenders[0];
   const second = defenders[1];
@@ -3325,42 +3366,60 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
   const nearestDistance = nearest?.distance ?? 999;
   const secondDistance = second?.distance ?? 999;
   const passingLaneThreat = defenders
-    .filter(defender => pointLineDistance(defender.point, qbPoint, targetPoint) < 18)
+    .map(defender => ({
+      ...defender,
+      targetDistance: Math.hypot(defender.point.x - targetPoint.x, defender.point.y - targetPoint.y),
+      laneDistance: pointLineDistance(defender.point, qbPoint, targetPoint)
+    }))
+    .filter(defender => defender.laneDistance < 16 && defender.targetDistance < 70)
     .sort((a, b) => a.distance - b.distance)[0];
+  if (!catchTarget) {
+    if (nearestDistance < 13) {
+      return { label: "Intercepted", className: "interception", defenderId: nearest.id, receiverId: null };
+    }
+    return { label: "Incomplete", className: "breakup", defenderId: "", receiverId: null };
+  }
+  if (nearestDistance > 38 && !passingLaneThreat) {
+    return { label: "Complete", className: "complete", defenderId: "", receiverId: catchTarget.id };
+  }
   let risk = 0;
   risk += nearestDistance < 13 ? 72 : nearestDistance < 22 ? 42 : nearestDistance < 34 ? 20 : 0;
   risk += secondDistance < 24 ? 14 : 0;
-  risk += passingLaneThreat ? 20 : 0;
-  risk += throwDistance > 360 ? 14 : throwDistance > 250 ? 7 : 0;
-  const routeDepth = Math.max(0, lineOfScrimmage - receiverPoint.y);
+  risk += passingLaneThreat ? 16 : 0;
+  risk += throwDistance > 360 ? 10 : throwDistance > 250 ? 5 : 0;
+  const routeDepth = Math.max(0, lineOfScrimmage - catchTarget.point.y);
   risk += routeDepth > 210 ? 10 : 0;
   const roll = Math.random() * 100;
   if (nearestDistance < 11 && roll < risk * .42) {
-    return { label: "Intercepted", className: "interception", defenderId: nearest.id };
+    return { label: "Intercepted", className: "interception", defenderId: nearest.id, receiverId: catchTarget.id };
   }
   if ((passingLaneThreat && roll < risk * .55) || roll < risk) {
-    return { label: "Broken up", className: "breakup", defenderId: passingLaneThreat?.id || nearest?.id || "" };
+    return { label: "Broken up", className: "breakup", defenderId: passingLaneThreat?.id || nearest?.id || "", receiverId: catchTarget.id };
   }
-  return { label: "Complete", className: "complete", defenderId: "" };
+  return { label: "Complete", className: "complete", defenderId: "", receiverId: catchTarget.id };
 }
 
-function startTestThrow(receiverId) {
+function startTestThrow(receiverId, targetPoint = null) {
   if (!testThrowActive()) return;
   if (testThrowState && !testThrowState.resolved) return;
   const start = { ...(animationState?.offense?.QB || offensePosition("QB")) };
-  const target = { ...(animationState?.offense?.[receiverId] || offensePosition(receiverId)) };
+  const target = { ...(receiverId ? (animationState?.offense?.[receiverId] || offensePosition(receiverId)) : targetPoint) };
   const distance = Math.hypot(target.x - start.x, target.y - start.y);
   const flightSpeed = 760;
   testThrowState = {
     receiverId,
+    targetMode: receiverId ? "receiver" : "spot",
     start,
     target,
     startedAt: performance.now(),
     duration: Math.max(.18, distance / flightSpeed),
     resolved: false,
-    outcome: null
+    outcome: null,
+    catchRun: null
   };
-  els.testStatus.textContent = `Throwing to ${offenseLabel(receiverId)}...`;
+  els.testStatus.textContent = receiverId
+    ? `Throwing to ${offenseLabel(receiverId)}...`
+    : "Throwing to spot...";
   renderRoutesAndPlayers();
   scheduleTestThrowRender();
 }
@@ -3736,6 +3795,10 @@ function extendRouteToBoundary(start, route) {
   if (!previous) return route;
   const dx = last.x - previous.x;
   const dy = last.y - previous.y;
+  const verticalMagnitude = Math.abs(dy);
+  const horizontalMagnitude = Math.abs(dx);
+  const isBreakingBackToBall = dy > 3 && verticalMagnitude >= horizontalMagnitude * .55;
+  if (isBreakingBackToBall) return route;
   const candidates = [];
   if (dx > 0) candidates.push((fieldWidth - fieldPadding - last.x) / dx);
   if (dx < 0) candidates.push((fieldPadding - last.x) / dx);
@@ -3852,7 +3915,9 @@ function renderTestInteractionOverlay() {
   if (!testThrowState) return;
   const elapsed = (performance.now() - testThrowState.startedAt) / 1000;
   const progress = Math.max(0, Math.min(1, elapsed / testThrowState.duration));
-  const liveTarget = animationState?.offense?.[testThrowState.receiverId] || testThrowState.target;
+  const liveTarget = testThrowState.targetMode === "receiver" && testThrowState.receiverId
+    ? animationState?.offense?.[testThrowState.receiverId] || testThrowState.target
+    : testThrowState.target;
   if (!testThrowState.resolved) {
     testThrowState.target = { ...liveTarget };
   }
@@ -3882,8 +3947,22 @@ function renderTestInteractionOverlay() {
   if (progress >= 1 && !testThrowState.resolved) {
     testThrowState.target = { ...liveTarget };
     testThrowState.outcome = evaluateThrowOutcome(testThrowState.receiverId, liveTarget);
+    if (!testThrowState.receiverId && testThrowState.outcome.receiverId) {
+      testThrowState.receiverId = testThrowState.outcome.receiverId;
+      testThrowState.targetMode = "receiver";
+    }
     testThrowState.resolved = true;
-    els.testStatus.textContent = `${testThrowState.outcome.label} to ${offenseLabel(testThrowState.receiverId)}${testThrowState.outcome.defenderId ? ` by ${currentDefense().labels[testThrowState.outcome.defenderId] || testThrowState.outcome.defenderId}` : ""}.`;
+    if (testThrowState.outcome.className === "complete" && testThrowState.receiverId) {
+      const catchPoint = animationState?.offense?.[testThrowState.receiverId] || liveTarget;
+      testThrowState.catchRun = { current: { ...catchPoint } };
+      animationState ||= { offense: {}, defense: {} };
+      animationState.offense[testThrowState.receiverId] = { ...catchPoint };
+      scheduleTestThrowRender();
+    }
+    const targetLabel = testThrowState.receiverId
+      ? ` to ${offenseLabel(testThrowState.receiverId)}`
+      : " at the spot";
+    els.testStatus.textContent = `${testThrowState.outcome.label}${targetLabel}${testThrowState.outcome.defenderId ? ` by ${currentDefense().labels[testThrowState.outcome.defenderId] || testThrowState.outcome.defenderId}` : ""}.`;
   }
   if (testThrowState.resolved && testThrowState.outcome) {
     const resultText = svgEl("text", {
@@ -6096,20 +6175,20 @@ els.field.addEventListener("pointermove", event => {
 });
 
 els.field.addEventListener("pointerdown", event => {
-  if (handleTestReceiverThrowClick(event)) {
+  if (handleTestThrowPointer(event)) {
     suppressFieldClickUntil = Date.now() + 250;
   }
 }, true);
 
 els.field.addEventListener("click", event => {
-  handleTestReceiverThrowClick(event);
+  handleTestThrowPointer(event);
 }, true);
 
 els.field.addEventListener("click", event => {
   if (Date.now() < suppressFieldClickUntil) {
     return;
   }
-  if (handleTestReceiverThrowClick(event)) {
+  if (handleTestThrowPointer(event)) {
     return;
   }
   if (appTab === "run" && scenarioEditing && scenarioTool === "zone"
@@ -8026,6 +8105,9 @@ function previewMovement(scope) {
           : interpolateTimedPath(snapStart, route, elapsed - maxMotionDuration, baseSpeed);
       });
     }
+    if (scope === "test" && completedTestCatchActive()) {
+      advanceTestCatchRun(deltaSeconds);
+    }
     const receiverSnapshots = skillPositions.map(position => {
       const current = animationState.offense[position.id]
         || editorOffensePositions()[position.id];
@@ -8195,7 +8277,9 @@ function previewMovement(scope) {
     });
     renderRoutesAndPlayers();
     renderDefense();
-    if (elapsed < totalDuration) {
+    const keepAnimatingTestCatch = scope === "test" && completedTestCatchActive();
+    const keepAnimatingTestThrow = scope === "test" && testThrowState && !testThrowState.resolved;
+    if (elapsed < totalDuration || keepAnimatingTestCatch || keepAnimatingTestThrow) {
       animationFrame = requestAnimationFrame(animate);
     } else {
       animationFrame = null;
