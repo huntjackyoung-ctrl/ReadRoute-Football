@@ -53,35 +53,12 @@ const storageKeys = {
   trenches: "readroute-trenches"
 };
 
-const zoneTypeOptions = {
-  deep: "Deep zone",
-  hookCurl: "Hook curl",
-  mid: "Mid zone",
-  flat: "Flat",
-  seamFlat: "Seam flat"
-};
-
 function zoneRadii(zone) {
   const legacyRadius = Number(zone?.radius) || 130;
   return {
     x: Math.max(40, Math.min(300, Number(zone?.radiusX) || legacyRadius)),
     y: Math.max(40, Math.min(300, Number(zone?.radiusY) || legacyRadius))
   };
-}
-
-function normalizeZoneType(type, zone = null, state = null) {
-  if (zoneTypeOptions[type]) return type;
-  if (!zone || !state) return "hookCurl";
-  const radii = zoneRadii(zone);
-  if (state.start?.y < lineOfScrimmage - 190
-    || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75)) return "deep";
-  if (zone.y > lineOfScrimmage - 110) return "flat";
-  const wide = zone.x < fieldWidth * .34 || zone.x > fieldWidth * .66 || radii.x > radii.y * 1.18;
-  return wide ? "seamFlat" : "hookCurl";
-}
-
-function zoneTypeLabel(type) {
-  return zoneTypeOptions[normalizeZoneType(type)] || zoneTypeOptions.hookCurl;
 }
 
 const trenchesFronts = {
@@ -379,7 +356,6 @@ const els = {
   zoneSizeControl: document.querySelector("#zoneSizeControl"),
   zoneSizeRange: document.querySelector("#zoneSizeRange"),
   zoneSizeInput: document.querySelector("#zoneSizeInput"),
-  zoneTypeSelect: document.querySelector("#zoneTypeSelect"),
   routeOptionsEditor: document.querySelector("#routeOptionsEditor"),
   routeOptionPlayer: document.querySelector("#routeOptionPlayer"),
   routeOptionSelect: document.querySelector("#routeOptionSelect"),
@@ -641,7 +617,6 @@ function normalizeDefense(defense) {
         const legacyRadius = Number(assignment?.radius) || 130;
         return [id, {
           ...assignment,
-          type: normalizeZoneType(assignment?.type, assignment, { start: (defense.positions || {})[id] || defaultDefensePositions()[id] || assignment }),
           radiusX: Math.max(40, Math.min(300, Number(assignment?.radiusX) || legacyRadius)),
           radiusY: Math.max(40, Math.min(300, Number(assignment?.radiusY) || legacyRadius))
         }];
@@ -3075,13 +3050,6 @@ function renderDefenseControls() {
     const size = String(Math.round(Math.max(radii.x, radii.y)));
     els.zoneSizeRange.value = size;
     els.zoneSizeInput.value = size;
-    if (els.zoneTypeSelect) {
-      els.zoneTypeSelect.value = normalizeZoneType(
-        selectedZone.type,
-        selectedZone,
-        { start: currentDefenseEditorPositions()[activeRouteId] || selectedZone }
-      );
-    }
   }
 }
 
@@ -4259,18 +4227,6 @@ function defender(x, y, label = "") {
       });
     }
     els.zones.append(zoneElement);
-    const zoneLabel = svgEl("text", {
-      x: zoneAssignment.x,
-      y: zoneAssignment.y,
-      "text-anchor": "middle",
-      "dominant-baseline": "middle",
-      fill: defenderColor,
-      "font-size": 20,
-      "font-weight": 900,
-      opacity: .72
-    });
-    zoneLabel.textContent = zoneTypeLabel(zoneAssignment.type);
-    els.zones.append(zoneLabel);
     els.zones.append(svgEl("line", {
       x1: playerPosition.x,
       y1: playerPosition.y,
@@ -5890,7 +5846,6 @@ els.field.addEventListener("click", event => {
     const radii = zoneRadii(existingZone);
     currentZoneAssignments()[activeRouteId] = {
       ...existingZone,
-      type: normalizeZoneType(existingZone?.type, existingZone, { start: runScenario?.defensePositions?.[activeRouteId] || existingZone }),
       x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
       y: Math.max(radii.y, Math.min(fieldHeight - radii.y, point.y)),
       radiusX: radii.x,
@@ -5988,9 +5943,6 @@ els.field.addEventListener("click", event => {
     const radii = zoneRadii(existingZone);
     currentDefense().zoneAssignments[activeRouteId] = {
       ...existingZone,
-      type: normalizeZoneType(existingZone?.type || "hookCurl", existingZone, {
-        start: currentDefenseEditorPositions()[activeRouteId] || existingZone
-      }),
       x: Math.max(radii.x, Math.min(900 - radii.x, point.x)),
       y: Math.max(radii.y, Math.min(fieldHeight - radii.y, point.y)),
       radiusX: radii.x,
@@ -6893,21 +6845,19 @@ function committedThreat(threats, state, profile, influence, elapsed, spread = 2
 
 function zoneStyle(zone, state) {
   const radii = zoneRadii(zone);
-  const zoneType = normalizeZoneType(zone?.type, zone, state);
-  const isDeepSafety = zoneType === "deep";
-  const isFlatDefender = zoneType === "flat" || zoneType === "seamFlat";
+  const isDeepSafety = state.start.y < lineOfScrimmage - 190
+    || zone.y < lineOfScrimmage - Math.max(155, radii.y * .75);
+  const isFlatDefender = zone.y > lineOfScrimmage - 110;
   const isWideZone = zone.x < fieldWidth * .34
     || zone.x > fieldWidth * .66
     || radii.x > radii.y * 1.18;
   return {
     radii,
-    zoneType,
     isDeepSafety,
     isFlatDefender,
     isWideZone,
-    isCurlFlat: zoneType === "seamFlat",
-    isHook: zoneType === "hookCurl" || zoneType === "mid",
-    isMidZone: zoneType === "mid"
+    isCurlFlat: isWideZone && !isDeepSafety,
+    isHook: !isDeepSafety && !isWideZone
   };
 }
 
@@ -7022,25 +6972,6 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     score += receiver.y < state.y + 70 ? 30 : 0;
     score -= read.isComingBack ? 38 * (profile.patience || .7) : 0;
     score -= read.isFlat ? 26 : 0;
-  } else if (style.zoneType === "seamFlat") {
-    score += read.isVertical ? 36 : 0;
-    score += read.isFlat ? 18 : 0;
-    score += read.isCrosser ? 10 : 0;
-    score -= read.isComingBack && read.routeDepth < 45 ? 12 : 0;
-  } else if (style.zoneType === "flat") {
-    score += read.isFlat ? 42 : 0;
-    score += read.isComingBack && read.routeDepth < 45 ? 18 : 0;
-    score -= read.routeDepth > 90 ? 26 : 0;
-  } else if (style.zoneType === "mid") {
-    score += read.routeDepth > 55 ? 24 : 0;
-    score += read.isCrosser ? 18 : 0;
-    score += read.isVertical ? 14 : 0;
-    score -= read.isFlat ? 24 : 0;
-  } else if (style.zoneType === "hookCurl") {
-    score += read.isCrosser ? 24 : 0;
-    score += read.isComingBack ? 16 : 0;
-    score += read.routeDepth > 35 && read.routeDepth < 115 ? 18 : 0;
-    score -= read.isFlat ? 12 : 0;
   } else if (style.isFlatDefender || style.isCurlFlat) {
     score += read.isFlat ? 34 * (profile.flatRally || .5) : 0;
     score += read.isCrosser ? 12 : 0;
@@ -7105,7 +7036,7 @@ function moveZoneDefender(
     x: zone.x + (profile.landmarkX || 0),
     y: zone.y + (profile.landmarkY || 0)
   };
-  const roofDefender = isDeepSafety && !hasDeepHelp;
+  const roofDefender = isDeepSafety;
   const reactionTime = profile.reaction
     + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0)
     + (influence.flatFoot ? .1 + ((1 - (profile.awareness || .7)) * .14) : 0);
@@ -7409,8 +7340,7 @@ function moveZoneDefender(
         && technique !== "matchVertical"
         && (primary.zoneDistance < 1.08 || primary.vision?.clear || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
       const shouldCarryVertical = primary.read.isVertical
-        && style.zoneType !== "flat"
-        && (style.zoneType === "seamFlat" || technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
+        && (technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
         && (primary.y < readLandmark.y + radii.y * .28 || (primaryOutsideZone && primary.vision?.clear));
       const shouldWallCrosser = (isHook || technique === "wallCrosser" || technique === "robInside")
         && primary.read.isCrosser;
@@ -8386,16 +8316,6 @@ els.zoneSizeInput.addEventListener("input", event => {
 
 els.zoneSizeInput.addEventListener("change", event => {
   updateSelectedZoneSize(event.target.value);
-});
-
-els.zoneTypeSelect?.addEventListener("change", event => {
-  if (appTab !== "create" || createScreen !== "defense" || defenseAssignmentMode !== "zone") return;
-  const zone = currentDefense().zoneAssignments?.[activeRouteId];
-  if (!zone) return;
-  zone.type = normalizeZoneType(event.target.value);
-  saveDefenses();
-  renderDefenseControls();
-  renderDefense();
 });
 
 function updateScenarioZoneSize(value) {
