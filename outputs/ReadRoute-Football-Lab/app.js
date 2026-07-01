@@ -7155,7 +7155,7 @@ function moveZoneDefender(
       y: Math.min(lineOfScrimmage - 24, state.start.y + 30)
     };
   }
-  if (!runFitBite && influence.falseStep && elapsed < reactionTime + .22) {
+  if (!runFitBite && !isDeepSafety && influence.falseStep && elapsed < reactionTime + .22) {
     mode = "bite";
     const stepDepth = isDeepSafety ? 18 : isHook ? 14 : 9;
     target = {
@@ -7278,7 +7278,7 @@ function moveZoneDefender(
       );
     }
   }
-  if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length && !roofDefender) {
+  if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length && !isDeepSafety) {
     const roofThreats = roofDefender
       ? threats.filter(threat =>
           threat.read.isVertical
