@@ -3321,6 +3321,7 @@ function scheduleTestThrowRender() {
 function completedTestCatchActive() {
   if (appTab !== "test" || !testThrowState?.resolved) return false;
   return testThrowState.outcome?.className === "complete"
+    && !testThrowState.catchRun?.tackled
     && (testThrowState.catchRun?.current?.y ?? fieldHeight) > fieldPadding + 3;
 }
 
@@ -3337,6 +3338,22 @@ function advanceTestCatchRun(deltaSeconds) {
   };
   testThrowState.catchRun.current = next;
   animationState.offense[id] = next;
+  const tackler = nearestDefendersTo(next)
+    .filter(defender => defender.distance <= 17)
+    .sort((a, b) => a.distance - b.distance)[0];
+  if (tackler) {
+    testThrowState.catchRun.tackled = true;
+    testThrowState.catchRun.tacklerId = tackler.id;
+    testThrowState.catchRun.current = {
+      ...next,
+      x: (next.x + tackler.point.x) / 2,
+      y: (next.y + tackler.point.y) / 2
+    };
+    animationState.offense[id] = { ...testThrowState.catchRun.current };
+    const tacklerLabel = currentDefense().labels[tackler.id] || tackler.id;
+    els.testStatus.textContent = `${offenseLabel(id)} tackled by ${tacklerLabel}.`;
+    return false;
+  }
   return next.y > fieldPadding + 3;
 }
 
@@ -3965,13 +3982,14 @@ function renderTestInteractionOverlay() {
     els.testStatus.textContent = `${testThrowState.outcome.label}${targetLabel}${testThrowState.outcome.defenderId ? ` by ${currentDefense().labels[testThrowState.outcome.defenderId] || testThrowState.outcome.defenderId}` : ""}.`;
   }
   if (testThrowState.resolved && testThrowState.outcome) {
+    const labelPoint = testThrowState.catchRun?.current || testThrowState.target;
     const resultText = svgEl("text", {
-      class: `throw-result ${testThrowState.outcome.className}`,
-      x: testThrowState.target.x,
-      y: testThrowState.target.y - 34,
+      class: `throw-result ${testThrowState.catchRun?.tackled ? "breakup" : testThrowState.outcome.className}`,
+      x: labelPoint.x,
+      y: labelPoint.y - 34,
       "text-anchor": "middle"
     });
-    resultText.textContent = testThrowState.outcome.label;
+    resultText.textContent = testThrowState.catchRun?.tackled ? "Tackled" : testThrowState.outcome.label;
     els.routes.append(resultText);
   }
 }
