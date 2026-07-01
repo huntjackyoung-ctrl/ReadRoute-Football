@@ -2015,6 +2015,12 @@ body.scenario-editing .scenario-edit-only { display: inline-block; }
   stroke-width: 2;
   pointer-events: none;
 }
+.caught-football {
+  fill: #8b4a22;
+  stroke: #fff2d1;
+  stroke-width: 1.8;
+  pointer-events: none;
+}
 .throw-result {
   font-size: 26px;
   font-weight: 950;

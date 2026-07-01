@@ -3259,6 +3259,10 @@ function resetTestInteraction() {
   }
 }
 
+function testThrowActive() {
+  return appTab === "test" && testRoundReady && !testAnswerRevealed;
+}
+
 function currentTestQbLookPoint() {
   if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return null;
   return testQbLookPoint;
@@ -3274,7 +3278,7 @@ function nearestDefendersTo(point) {
     .sort((a, b) => a.distance - b.distance);
 }
 
-function nearestTestReceiver(point, maxDistance = 42) {
+function nearestTestReceiver(point, maxDistance = 62) {
   return skillPositions
     .map(position => {
       const receiverPoint = animationState?.offense?.[position.id] || offensePosition(position.id);
@@ -3285,6 +3289,17 @@ function nearestTestReceiver(point, maxDistance = 42) {
     })
     .filter(receiver => receiver.distance <= maxDistance)
     .sort((a, b) => a.distance - b.distance)[0] || null;
+}
+
+function handleTestReceiverThrowClick(event) {
+  if (!testThrowActive()) return false;
+  const receiver = nearestTestReceiver(eventToFieldPoint(event));
+  if (!receiver) return false;
+  event.preventDefault();
+  event.stopPropagation();
+  event.stopImmediatePropagation?.();
+  startTestThrow(receiver.id);
+  return true;
 }
 
 function scheduleTestThrowRender() {
@@ -3330,7 +3345,7 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
 }
 
 function startTestThrow(receiverId) {
-  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
+  if (!testThrowActive()) return;
   if (testThrowState && !testThrowState.resolved) return;
   const start = { ...(animationState?.offense?.QB || offensePosition("QB")) };
   const target = { ...(animationState?.offense?.[receiverId] || offensePosition(receiverId)) };
@@ -3706,6 +3721,39 @@ function createPreviewRoute(id, start) {
   return route.map(point => ({ ...point, x: point.x + dx, y: point.y + dy }));
 }
 
+function extendRouteToBoundary(start, route) {
+  if (!route.length) return route;
+  const path = [start, ...route];
+  let last = path[path.length - 1];
+  let previous = null;
+  for (let index = path.length - 2; index >= 0; index -= 1) {
+    const candidate = path[index];
+    if (Math.hypot(last.x - candidate.x, last.y - candidate.y) > 2) {
+      previous = candidate;
+      break;
+    }
+  }
+  if (!previous) return route;
+  const dx = last.x - previous.x;
+  const dy = last.y - previous.y;
+  const candidates = [];
+  if (dx > 0) candidates.push((fieldWidth - fieldPadding - last.x) / dx);
+  if (dx < 0) candidates.push((fieldPadding - last.x) / dx);
+  if (dy > 0) candidates.push((fieldHeight - fieldPadding - last.y) / dy);
+  if (dy < 0) candidates.push((fieldPadding - last.y) / dy);
+  const distanceRatio = candidates
+    .filter(value => Number.isFinite(value) && value > 0)
+    .sort((a, b) => a - b)[0];
+  if (!distanceRatio || distanceRatio < .12) return route;
+  const extendedPoint = {
+    ...last,
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, last.x + (dx * distanceRatio))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, last.y + (dy * distanceRatio))),
+    speed: last.speed || 1
+  };
+  return [...route, extendedPoint];
+}
+
 function makeMovable(group, side, id) {
   group.classList.add("movable-player");
   const isPlaySpecificRunningBack = () => appTab === "create"
@@ -3784,8 +3832,8 @@ function appendSegmentSpeedControl(handle, point) {
 }
 
 function renderTestInteractionOverlay() {
-  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
-  const qbPoint = offensePosition("QB");
+  if (!testThrowActive()) return;
+  const qbPoint = animationState?.offense?.QB || offensePosition("QB");
   if (testQbLookPoint) {
     els.routes.append(svgEl("line", {
       class: "qb-look-line",
@@ -3804,29 +3852,36 @@ function renderTestInteractionOverlay() {
   if (!testThrowState) return;
   const elapsed = (performance.now() - testThrowState.startedAt) / 1000;
   const progress = Math.max(0, Math.min(1, elapsed / testThrowState.duration));
+  const liveTarget = animationState?.offense?.[testThrowState.receiverId] || testThrowState.target;
+  if (!testThrowState.resolved) {
+    testThrowState.target = { ...liveTarget };
+  }
   const arc = Math.sin(progress * Math.PI) * 18;
   const ballPoint = {
-    x: testThrowState.start.x + ((testThrowState.target.x - testThrowState.start.x) * progress),
-    y: testThrowState.start.y + ((testThrowState.target.y - testThrowState.start.y) * progress) - arc
+    x: testThrowState.start.x + ((liveTarget.x - testThrowState.start.x) * progress),
+    y: testThrowState.start.y + ((liveTarget.y - testThrowState.start.y) * progress) - arc
   };
   els.routes.append(svgEl("line", {
     class: "throw-trajectory",
     x1: testThrowState.start.x,
     y1: testThrowState.start.y,
-    x2: testThrowState.target.x,
-    y2: testThrowState.target.y
+    x2: liveTarget.x,
+    y2: liveTarget.y
   }));
-  const football = svgEl("ellipse", {
-    class: "test-football",
-    cx: ballPoint.x,
-    cy: ballPoint.y,
-    rx: 10,
-    ry: 5,
-    transform: `rotate(${Math.atan2(testThrowState.target.y - testThrowState.start.y, testThrowState.target.x - testThrowState.start.x) * 180 / Math.PI} ${ballPoint.x} ${ballPoint.y})`
-  });
-  els.routes.append(football);
+  if (!testThrowState.resolved || testThrowState.outcome?.className !== "complete") {
+    const football = svgEl("ellipse", {
+      class: "test-football",
+      cx: ballPoint.x,
+      cy: ballPoint.y,
+      rx: 10,
+      ry: 5,
+      transform: `rotate(${Math.atan2(liveTarget.y - testThrowState.start.y, liveTarget.x - testThrowState.start.x) * 180 / Math.PI} ${ballPoint.x} ${ballPoint.y})`
+    });
+    els.routes.append(football);
+  }
   if (progress >= 1 && !testThrowState.resolved) {
-    testThrowState.outcome = evaluateThrowOutcome(testThrowState.receiverId, testThrowState.target);
+    testThrowState.target = { ...liveTarget };
+    testThrowState.outcome = evaluateThrowOutcome(testThrowState.receiverId, liveTarget);
     testThrowState.resolved = true;
     els.testStatus.textContent = `${testThrowState.outcome.label} to ${offenseLabel(testThrowState.receiverId)}${testThrowState.outcome.defenderId ? ` by ${currentDefense().labels[testThrowState.outcome.defenderId] || testThrowState.outcome.defenderId}` : ""}.`;
   }
@@ -4057,6 +4112,18 @@ function renderRoutesAndPlayers() {
     const text = svgEl("text", { x: 0, y: 4, "text-anchor": "middle", fill: playerTextColor, "font-size": 10, "font-weight": 950 });
     text.textContent = offenseLabel(position.id);
     group.append(text);
+    if (testThrowState?.resolved
+      && testThrowState.outcome?.className === "complete"
+      && testThrowState.receiverId === position.id) {
+      group.append(svgEl("ellipse", {
+        class: "caught-football",
+        cx: 14,
+        cy: -12,
+        rx: 8,
+        ry: 4,
+        transform: "rotate(-24 14 -12)"
+      }));
+    }
     els.players.append(group);
 
     const editingCreatePath = appTab === "create" && createScreen === "play"
@@ -6023,23 +6090,21 @@ function updateDrawingGuide(event) {
 }
 
 els.field.addEventListener("pointermove", event => {
-  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
+  if (!testThrowActive()) return;
   testQbLookPoint = eventToFieldPoint(event);
   renderRoutesAndPlayers();
 });
 
 els.field.addEventListener("click", event => {
+  handleTestReceiverThrowClick(event);
+}, true);
+
+els.field.addEventListener("click", event => {
   if (Date.now() < suppressFieldClickUntil) {
     return;
   }
-  if (appTab === "test" && testRoundReady && !testAnswerRevealed) {
-    const receiver = nearestTestReceiver(eventToFieldPoint(event));
-    if (receiver) {
-      event.preventDefault();
-      event.stopPropagation();
-      startTestThrow(receiver.id);
-      return;
-    }
+  if (handleTestReceiverThrowClick(event)) {
+    return;
   }
   if (appTab === "run" && scenarioEditing && scenarioTool === "zone"
     && activeRouteSide === "defense") {
@@ -7788,15 +7853,20 @@ function previewMovement(scope) {
     ? routeableOffense.map(position => [position.id, editorOffensePositions()[position.id]])
     : Object.entries(editorOffensePositions());
   const offensePaths = animateOffense
-    ? offenseEntries.map(([id, start]) => ({
-        id,
-        start,
-        motion: currentMotion(id),
-        snapStart: motionEnd(start, currentMotion(id)),
-        route: scope === "play"
+    ? offenseEntries.map(([id, start]) => {
+        const motion = currentMotion(id);
+        const snapStart = motionEnd(start, motion);
+        const drawnRoute = scope === "play"
           ? createPreviewRoute(id, start)
-          : postSnapRoute(id, start)
-      }))
+          : postSnapRoute(id, start);
+        return {
+          id,
+          start,
+          motion,
+          snapStart,
+          route: extendRouteToBoundary(snapStart, drawnRoute)
+        };
+      })
     : [];
   if (scope === "run" || scope === "test") {
     if (!runScenario) resetRunScenario();
