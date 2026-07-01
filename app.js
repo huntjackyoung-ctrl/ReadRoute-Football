@@ -7153,10 +7153,18 @@ function moveZoneDefender(
       const downhillMistake = influence.falseStep && elapsed < reactionTime + .42;
       const frozenEyes = influence.flatFoot && elapsed < reactionTime + .42;
       const lateSafety = downhillMistake || frozenEyes || safetyMode === "late";
-      carryingDeepThreat = !lateSafety;
+      const cushionToThreat = selectedThreat.y - state.y;
+      const verticalHasDeclared = selectedThreat.y < state.start.y - 34
+        || cushionToThreat < Math.max(28, profile.cushion * .62)
+        || elapsed > reactionTime + .72;
+      const pedalFirst = !lateSafety
+        && safetyMode !== "midpoint"
+        && !verticalHasDeclared
+        && technique !== "matchVertical";
+      carryingDeepThreat = !lateSafety && !pedalFirst;
       mode = downhillMistake || safetyMode === "late"
         ? "recover"
-        : safetyMode === "midpoint" || frozenEyes
+        : safetyMode === "midpoint" || frozenEyes || pedalFirst
           ? "midpoint"
           : "carry";
       state.deepThreatId = selectedThreat.id;
@@ -7165,7 +7173,7 @@ function moveZoneDefender(
         x: readLandmark.x + ((targetX - readLandmark.x) * (
           safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
         )),
-        y: safetyMode === "midpoint" || frozenEyes
+        y: safetyMode === "midpoint" || frozenEyes || pedalFirst
           ? Math.min(state.start.y, deepThreatLine)
           : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
@@ -7193,12 +7201,17 @@ function moveZoneDefender(
     if (isDeepSafety) {
       const attach = technique === "matchVertical"
         || (technique !== "keepDepth" && technique !== "midpoint" && (primaryOutsideZone || (profile.safetyChoice > .42 && threats.length > 1)));
-      mode = attach ? "carry" : "midpoint";
+      const cushionToThreat = primary.y - state.y;
+      const verticalHasDeclared = primary.y < state.start.y - 34
+        || cushionToThreat < Math.max(28, profile.cushion * .62)
+        || elapsed > reactionTime + .72;
+      const pedalFirst = attach && !verticalHasDeclared && technique !== "matchVertical";
+      mode = attach && !pedalFirst ? "carry" : "midpoint";
       target = {
-        x: attach
+        x: attach && !pedalFirst
           ? primary.x + ((profile.leverageNoise || 0) * .2)
           : readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
-        y: attach
+        y: attach && !pedalFirst
           ? Math.min(deepThreatLine, primary.y - profile.cushion)
           : Math.min(state.start.y, deepThreatLine)
       };
