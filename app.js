@@ -6547,13 +6547,19 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
   };
 }
 
-function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp, technique = "balanced") {
+function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp, technique = "balanced", claimedByOther = false) {
   if (verticalThreatCount < 2) return "attach";
   if (technique === "keepDepth" || technique === "midpoint") return "midpoint";
   if (technique === "matchVertical") return profile.safetyChoice < .5 ? "attach-left" : "attach-right";
   const roll = profile.safetyModeRoll || 0;
   const mistakeRate = profile.mistakeRate || 0;
   const discipline = profile.discipline || .7;
+  if (claimedByOther) {
+    const bustChance = .03 + (mistakeRate * .12) + ((1 - discipline) * .08);
+    if ((profile.wrongChoice || 0) >= bustChance) {
+      return roll < .62 + (discipline * .18) ? "midpoint" : "overplay-deepest";
+    }
+  }
   if (roll < .24 + (discipline * .16)) return "midpoint";
   if (roll < .44) return "attach-left";
   if (roll < .64) return "attach-right";
@@ -6648,7 +6654,67 @@ function confirmedReceiverRead(receiver, state, safeDelta) {
   };
 }
 
-function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0, receiverIndex = 0) {
+function defenderFacingVector(state, style, profile, influence, readLandmark) {
+  if (influence?.backfieldRead) {
+    const centerX = fieldWidth / 2;
+    const backfieldY = lineOfScrimmage + 34;
+    const dx = centerX - state.x;
+    const dy = backfieldY - state.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
+  if (profile?.eyes === "landmark") {
+    const dx = readLandmark.x - state.x;
+    const dy = readLandmark.y - state.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
+  if (state.primaryThreatId && state.lastSeenThreats?.[state.primaryThreatId]) {
+    const threat = state.lastSeenThreats[state.primaryThreatId];
+    const dx = threat.x - state.x;
+    const dy = threat.y - state.y;
+    const length = Math.hypot(dx, dy) || 1;
+    return { x: dx / length, y: dy / length };
+  }
+  if (style.isDeepSafety) return { x: 0, y: -1 };
+  if (style.isFlatDefender || style.isCurlFlat) {
+    const outside = state.start.x < fieldWidth / 2 ? -1 : 1;
+    return { x: outside * .55, y: -.83 };
+  }
+  return { x: 0, y: -1 };
+}
+
+function receiverVisionInfo(receiver, state, style, profile, influence, readLandmark) {
+  const facing = defenderFacingVector(state, style, profile, influence, readLandmark);
+  const dx = receiver.x - state.x;
+  const dy = receiver.y - state.y;
+  const distance = Math.hypot(dx, dy) || 1;
+  const dot = ((dx / distance) * facing.x) + ((dy / distance) * facing.y);
+  const baseCone = style.isDeepSafety ? .2 : style.isFlatDefender || style.isCurlFlat ? .08 : .02;
+  const awarenessBoost = ((profile.awareness || .7) - .5) * -.12;
+  const backfieldPenalty = influence?.backfieldRead ? .18 : 0;
+  const coneThreshold = Math.max(-.16, Math.min(.42, baseCone + awarenessBoost + backfieldPenalty));
+  const read = receiver.read || receiverRouteRead(receiver);
+  const eyeMode = profile.eyes || "balanced";
+  let visibility = (dot - coneThreshold) / (1 - coneThreshold);
+  if (eyeMode === "receiver" || eyeMode === "nearest") visibility += .14;
+  if (eyeMode === "landmark") visibility += .04;
+  if (eyeMode === "backfield") visibility -= .18;
+  if (read.isVertical && style.isDeepSafety) visibility += .1;
+  if (read.isFlat && (style.isFlatDefender || style.isCurlFlat)) visibility += .08;
+  visibility = Math.max(0, Math.min(1, visibility));
+  const peripheral = dot > coneThreshold - .22 && visibility < .42;
+  return {
+    dot,
+    distance,
+    visible: visibility > .08,
+    clear: visibility > .38,
+    peripheral,
+    score: visibility
+  };
+}
+
+function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCount = 0, receiverIndex = 0, vision = null) {
   const radii = zoneRadii(zone);
   const projected = {
     x: receiver.x + (receiver.vx * .16),
@@ -6659,9 +6725,14 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   const movingIntoZone = receiver.zoneDistancePrevious - distance;
   const profile = state.profile || {};
   const technique = normalizeDefenderTechnique(state.technique);
+  const visionInfo = vision || receiver.vision || { score: 1, clear: true, peripheral: false };
   let score = (1.45 - Math.min(1.45, distance)) * 80;
   score += Math.min(30, Math.max(-12, movingIntoZone * 125));
   score += Math.min(24, read.verticalSpeed * .16);
+  score += (visionInfo.score - .5) * (style.isDeepSafety ? 34 : 28);
+  if (visionInfo.clear) score += style.isDeepSafety ? 14 : 10;
+  if (visionInfo.peripheral) score -= 10 * (profile.discipline || .7);
+  if (!visionInfo.visible && distance > 1) score -= 26 + ((profile.awareness || .7) * 12);
   if (style.isDeepSafety) {
     score += Math.min(58, read.routeDepth * .18);
     score += read.isVertical ? 28 : 0;
@@ -6694,7 +6765,10 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   } else if (technique === "wallCrosser") {
     score += read.isCrosser ? 34 : 0;
   }
-  score -= claimCount * (style.isDeepSafety ? 8 : 28);
+  const duplicateClaimPenalty = style.isDeepSafety
+    ? 30 + ((profile.discipline || .7) * 26) - ((profile.mistakeRate || 0) * 14)
+    : 28;
+  score -= claimCount * duplicateClaimPenalty;
   if (state.primaryThreatId === receiver.id) score += 8 + ((profile.discipline || .7) * 8);
   const repNoise = Math.sin(
     ((profile.choiceNoise || .5) * 999)
@@ -6736,7 +6810,7 @@ function moveZoneDefender(
     state.start.y,
     Math.min(state.start.y + 25, zone.y + (radii.y * .2))
   );
-  const threats = receivers
+  const receiverCandidates = receivers
     .map((receiver, receiverIndex) => {
       const read = confirmedReceiverRead(receiver, state, safeDelta);
       const enriched = {
@@ -6744,8 +6818,10 @@ function moveZoneDefender(
         zoneDistance: zoneDistance(receiver, zone),
         read
       };
+      const vision = receiverVisionInfo(enriched, state, style, profile, influence, readLandmark);
       return {
         ...enriched,
+        vision,
         threatScore: receiverThreatScore(
           enriched,
           zone,
@@ -6753,11 +6829,37 @@ function moveZoneDefender(
           style,
           hasDeepHelp,
           coverageClaims.get(receiver.id) || 0,
-          receiverIndex
+          receiverIndex,
+          vision
         )
       };
+    });
+  state.lastSeenThreats = Object.fromEntries(
+    receiverCandidates
+      .filter(receiver => receiver.vision?.visible)
+      .map(receiver => [receiver.id, { x: receiver.x, y: receiver.y }])
+  );
+  const visionPullLimit = isDeepSafety
+    ? 2.1
+    : isFlatDefender || isCurlFlat
+      ? 1.62
+      : 1.5;
+  const visionPullChance = Math.min(
+    .76,
+    .12
+      + ((profile.aggressiveness || .5) * .34)
+      + ((profile.mistakeRate || 0) * .42)
+      + ((1 - (profile.discipline || .7)) * .3)
+  );
+  const threats = receiverCandidates
+    .filter(receiver => {
+      const inZoneRange = receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28);
+      const visiblePull = receiver.vision?.clear
+        && receiver.zoneDistance <= visionPullLimit
+        && (receiver.read.isVertical || receiver.read.isCrosser || receiver.read.isFlat)
+        && (profile.wrongChoice < visionPullChance || profile.eyes === "receiver" || profile.eyes === "nearest");
+      return inZoneRange || visiblePull;
     })
-    .filter(receiver => receiver.zoneDistance <= (isDeepSafety ? 1.55 : 1.28))
     .sort((a, b) => b.threatScore - a.threatScore);
 
   let target = { ...state.start };
@@ -6789,13 +6891,20 @@ function moveZoneDefender(
     };
   }
   if (!runFitBite && elapsed >= reactionTime && isDeepSafety) {
-    let verticalThreats = receivers
+    let verticalThreats = receiverCandidates
       .filter(receiver =>
         receiver.y <= deepThreatLine + 80
         && receiver.vy < 18
-        && Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
+        && (
+          Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
+          || (receiver.vision?.clear && receiver.zoneDistance <= 2.15)
+        )
       )
-      .sort((a, b) => a.y - b.y);
+      .sort((a, b) => {
+        const depthDiff = a.y - b.y;
+        if (Math.abs(depthDiff) > 18) return depthDiff;
+        return (b.vision?.score || 0) - (a.vision?.score || 0);
+      });
     if (influence.wrongChoice && verticalThreats.length > 1) {
       const second = verticalThreats.find(receiver => receiver.y <= verticalThreats[0].y + 65);
       if (second) verticalThreats = [second, ...verticalThreats.filter(receiver => receiver.id !== second.id)];
@@ -6809,7 +6918,20 @@ function moveZoneDefender(
         receiver.x < left.x ? receiver : left, deepestThreat);
       const rightmost = nearbyVerticals.reduce((right, receiver) =>
         receiver.x > right.x ? receiver : right, deepestThreat);
-      const safetyMode = chooseSafetyMode(profile, nearbyVerticals.length, hasDeepHelp, technique);
+      const unclaimedVerticals = nearbyVerticals.filter(receiver =>
+        !(coverageClaims.get(receiver.id) || 0)
+      );
+      const claimedVerticals = nearbyVerticals.filter(receiver =>
+        (coverageClaims.get(receiver.id) || 0) > 0
+      );
+      const allVerticalsAlreadyClaimed = claimedVerticals.length === nearbyVerticals.length;
+      const safetyMode = chooseSafetyMode(
+        profile,
+        nearbyVerticals.length,
+        hasDeepHelp,
+        technique,
+        allVerticalsAlreadyClaimed
+      );
       const selectedThreat = safetyMode === "attach-left"
         ? leftmost
         : safetyMode === "attach-right"
@@ -6819,7 +6941,7 @@ function moveZoneDefender(
                 Math.abs(receiver.x - state.x) < Math.abs(nearest.x - state.x)
                   ? receiver
                   : nearest, deepestThreat)
-            : deepestThreat;
+            : unclaimedVerticals[0] || deepestThreat;
       const splitX = nearbyVerticals.length > 1
         ? (leftmost.x + rightmost.x) / 2
         : deepestThreat.x;
@@ -6860,9 +6982,19 @@ function moveZoneDefender(
     const primary = committedThreat(threats, state, profile, influence, elapsed, 34) || threats[0];
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
+    const primaryOutsideZone = primary.zoneDistance > 1.08;
+    const eyePullAmount = primaryOutsideZone
+      ? Math.min(
+          .62,
+          .18
+            + ((primary.vision?.score || 0) * .24)
+            + ((profile.aggressiveness || .5) * .12)
+            + ((1 - (profile.discipline || .7)) * .18)
+        )
+      : 1;
     if (isDeepSafety) {
       const attach = technique === "matchVertical"
-        || (technique !== "keepDepth" && technique !== "midpoint" && profile.safetyChoice > .42 && threats.length > 1);
+        || (technique !== "keepDepth" && technique !== "midpoint" && (primaryOutsideZone || (profile.safetyChoice > .42 && threats.length > 1)));
       mode = attach ? "carry" : "midpoint";
       target = {
         x: attach
@@ -6877,10 +7009,10 @@ function moveZoneDefender(
         && primary.read.isFlat
         && technique !== "keepDepth"
         && technique !== "matchVertical"
-        && (primary.zoneDistance < 1.08 || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
+        && (primary.zoneDistance < 1.08 || primary.vision?.clear || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
       const shouldCarryVertical = primary.read.isVertical
         && (technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
-        && primary.y < readLandmark.y + radii.y * .28;
+        && (primary.y < readLandmark.y + radii.y * .28 || (primaryOutsideZone && primary.vision?.clear));
       const shouldWallCrosser = (isHook || technique === "wallCrosser" || technique === "robInside")
         && primary.read.isCrosser;
       const passOffVertical = hasDeepHelp
@@ -6915,21 +7047,26 @@ function moveZoneDefender(
         mode = "spot";
         const lean = Math.max(.14, Math.min(.48, .22 + ((profile.aggressiveness || .5) * .18) + (profile.leanNoise || 0)));
         target = {
-          x: readLandmark.x + ((primary.x - readLandmark.x) * lean),
-          y: readLandmark.y + ((primary.y - readLandmark.y) * Math.min(.28, lean))
+          x: readLandmark.x + ((primary.x - readLandmark.x) * lean * eyePullAmount),
+          y: readLandmark.y + ((primary.y - readLandmark.y) * Math.min(.28, lean * eyePullAmount))
         };
       }
     }
   } else if (!threats.length && state.primaryThreatId) {
     state.primaryThreatId = null;
   }
-  if (!carryingDeepThreat && mode !== "carry" && mode !== "rally") target = clampToZone(target, zone);
+  const assignedThreat = state.primaryThreatId
+    ? threats.find(threat => threat.id === state.primaryThreatId)
+    : null;
+  const pulledByVision = assignedThreat?.zoneDistance > 1.08 && assignedThreat?.vision?.clear;
+  if (!carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
     if (mode === "midpoint") target.y = Math.min(target.y, state.start.y);
   } else if (mode !== "carry" && mode !== "rally" && mode !== "run-fit") {
-    target.x = Math.max(zone.x - radii.x * .82, Math.min(zone.x + radii.x * .82, target.x));
-    target.y = Math.max(zone.y - radii.y * .7, Math.min(zone.y + radii.y * .7, target.y));
+    const pullPad = pulledByVision ? .34 + ((1 - (profile.discipline || .7)) * .34) : 0;
+    target.x = Math.max(zone.x - radii.x * (.82 + pullPad), Math.min(zone.x + radii.x * (.82 + pullPad), target.x));
+    target.y = Math.max(zone.y - radii.y * (.7 + pullPad), Math.min(zone.y + radii.y * (.7 + pullPad), target.y));
   }
 
   const gapX = target.x - state.x;

@@ -163,6 +163,13 @@ button, select { cursor: pointer; }
   font-weight: 900;
   text-transform: capitalize;
 }
+.workspace-member small .online-now,
+.workspace-activity-member strong small {
+  color: #3d7b20;
+  font-size: 9px;
+  font-weight: 950;
+  text-transform: uppercase;
+}
 .workspace-activity-panel {
   margin-top: 20px;
   padding-top: 16px;
@@ -211,7 +218,10 @@ button, select { cursor: pointer; }
   background: #faf8f2;
 }
 .workspace-activity-member strong {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-bottom: 8px;
   color: var(--ink);
   font-size: 12px;

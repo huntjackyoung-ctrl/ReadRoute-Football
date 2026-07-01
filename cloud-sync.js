@@ -9,6 +9,7 @@ import {
 import {
   get,
   getDatabase,
+  onDisconnect,
   onValue,
   ref,
   runTransaction,
@@ -44,11 +45,16 @@ let waitingForNoteBlur = false;
 let stopRemoteListener = null;
 let stopMemberListener = null;
 let stopActivityListener = null;
+let stopSessionListener = null;
 let latestMembers = {};
 let latestDailyActivity = {};
+let latestSessions = {};
 let activityView = "day";
 let activityTimer = null;
 let lastActivityTickAt = 0;
+let pageWasVisible = document.visibilityState === "visible";
+let sessionStartedAt = "";
+let sessionSeconds = 0;
 
 function setStatus(message) {
   if (status) status.textContent = message;
@@ -121,7 +127,11 @@ function recentWeekKeys(count = 6) {
 }
 
 function formatDuration(seconds = 0) {
-  const totalMinutes = Math.round((Number(seconds) || 0) / 60);
+  const normalizedSeconds = Math.max(0, Number(seconds) || 0);
+  if (normalizedSeconds > 0 && normalizedSeconds < 60) {
+    return `${Math.max(1, Math.round(normalizedSeconds))}s`;
+  }
+  const totalMinutes = Math.round(normalizedSeconds / 60);
   if (totalMinutes < 1) return "0m";
   const hours = Math.floor(totalMinutes / 60);
   const minutes = totalMinutes % 60;
@@ -148,6 +158,17 @@ function latestSeenAtFor(uid) {
     .filter(Boolean)
     .sort()
     .at(-1) || "";
+}
+
+function activeSessionsFor(uid) {
+  const now = Date.now();
+  return Object.values(latestSessions || {})
+    .filter(session => session?.uid === uid)
+    .filter(session => session.active !== false)
+    .filter(session => {
+      const seenAt = Date.parse(session.lastSeenAt || "");
+      return seenAt && now - seenAt < 75000;
+    });
 }
 
 if (!config?.apiKey || !config?.databaseURL) {
@@ -188,11 +209,13 @@ if (!config?.apiKey || !config?.databaseURL) {
     const now = new Date().toISOString();
     const dayKey = localDateKey();
     const basePath = `workspaces/${activeWorkspaceId}/activity/daily/${dayKey}/${activeUser.uid}`;
+    const roundedSeconds = Math.max(0, Math.round(Number(seconds) || 0));
+    sessionSeconds += roundedSeconds;
     try {
-      if (seconds > 0) {
+      if (roundedSeconds > 0) {
         await runTransaction(
           ref(database, `${basePath}/seconds`),
-          current => (Number(current) || 0) + seconds
+          current => (Number(current) || 0) + roundedSeconds
         );
       }
       await update(ref(database, basePath), {
@@ -200,6 +223,17 @@ if (!config?.apiKey || !config?.databaseURL) {
         email: activeUser.email || "",
         role: activeRole,
         lastSeenAt: now
+      });
+      await update(ref(database, `workspaces/${activeWorkspaceId}/sessions/${cloudClientId}`), {
+        uid: activeUser.uid,
+        name: activeUser.displayName || activeUser.email || "Member",
+        email: activeUser.email || "",
+        role: activeRole,
+        active: true,
+        startedAt: sessionStartedAt || now,
+        lastSeenAt: now,
+        currentDay: dayKey,
+        sessionSeconds
       });
     } catch (error) {
       console.warn("Workspace activity tracking failed", error);
@@ -209,8 +243,7 @@ if (!config?.apiKey || !config?.databaseURL) {
   function flushActivityTime(force = false) {
     if (!activeUser || !activeWorkspaceId || !activeRole) return;
     const now = Date.now();
-    const wasVisible = document.visibilityState === "visible";
-    const elapsed = lastActivityTickAt && wasVisible
+    const elapsed = lastActivityTickAt && pageWasVisible
       ? Math.min(90, Math.max(0, Math.round((now - lastActivityTickAt) / 1000)))
       : 0;
     lastActivityTickAt = now;
@@ -219,9 +252,17 @@ if (!config?.apiKey || !config?.databaseURL) {
 
   function startActivityTracking() {
     clearInterval(activityTimer);
+    pageWasVisible = document.visibilityState === "visible";
     lastActivityTickAt = Date.now();
+    sessionStartedAt = new Date().toISOString();
+    sessionSeconds = 0;
     recordWorkspaceActivity(0);
-    activityTimer = setInterval(() => flushActivityTime(false), 30000);
+    const sessionRef = ref(database, `workspaces/${activeWorkspaceId}/sessions/${cloudClientId}`);
+    onDisconnect(sessionRef).update({
+      active: false,
+      lastSeenAt: new Date().toISOString()
+    }).catch(error => console.warn("Workspace disconnect tracking failed", error));
+    activityTimer = setInterval(() => flushActivityTime(false), 10000);
   }
 
   function stopActivityTracking() {
@@ -229,6 +270,14 @@ if (!config?.apiKey || !config?.databaseURL) {
     clearInterval(activityTimer);
     activityTimer = null;
     lastActivityTickAt = 0;
+    pageWasVisible = document.visibilityState === "visible";
+    if (activeWorkspaceId) {
+      update(ref(database, `workspaces/${activeWorkspaceId}/sessions/${cloudClientId}`), {
+        active: false,
+        lastSeenAt: new Date().toISOString(),
+        sessionSeconds
+      }).catch(error => console.warn("Workspace activity close failed", error));
+    }
   }
 
   async function uploadSnapshot(snapshot = window.ReadRouteCloud?.getSnapshot()) {
@@ -374,10 +423,11 @@ if (!config?.apiKey || !config?.databaseURL) {
       <p class="eyebrow">Members</p>
       ${entries.map(([uid, member]) => {
         const lastSeenAt = latestSeenAtFor(uid);
+        const onlineSessions = activeSessionsFor(uid);
         return `
         <div class="workspace-member">
           <span>${member.name || member.email || "Member"}<br><small>${member.email || ""}</small></span>
-          <small>${member.role || "viewer"}${lastSeenAt ? `<br>Last seen ${new Date(lastSeenAt).toLocaleString()}` : ""}</small>
+          <small>${member.role || "viewer"}${onlineSessions.length ? `<br><b class="online-now">Online now</b>` : ""}${lastSeenAt ? `<br>Last seen ${new Date(lastSeenAt).toLocaleString()}` : ""}</small>
         </div>
       `;
       }).join("")}
@@ -405,7 +455,10 @@ if (!config?.apiKey || !config?.databaseURL) {
       </div>
       ${members.length ? members.map(([uid, member]) => `
         <div class="workspace-activity-member">
-          <strong>${member.name || member.email || "Member"}</strong>
+          <strong>
+            ${member.name || member.email || "Member"}
+            ${activeSessionsFor(uid).length ? `<small>Online now</small>` : ""}
+          </strong>
           <div class="workspace-activity-periods">
             ${periods.map(period => {
               const seconds = activityView === "week"
@@ -451,6 +504,7 @@ if (!config?.apiKey || !config?.databaseURL) {
     inviteResult?.classList.add("hidden");
     stopMemberListener?.();
     stopActivityListener?.();
+    stopSessionListener?.();
     stopMemberListener = onValue(
       ref(database, `workspaces/${activeWorkspaceId}/members`),
       snapshot => {
@@ -462,6 +516,13 @@ if (!config?.apiKey || !config?.databaseURL) {
       ref(database, `workspaces/${activeWorkspaceId}/activity/daily`),
       snapshot => {
         latestDailyActivity = snapshot.val() || {};
+        renderWorkspaceOverview();
+      }
+    );
+    stopSessionListener = onValue(
+      ref(database, `workspaces/${activeWorkspaceId}/sessions`),
+      snapshot => {
+        latestSessions = snapshot.val() || {};
         renderWorkspaceOverview();
       }
     );
@@ -503,6 +564,7 @@ if (!config?.apiKey || !config?.databaseURL) {
 
   document.addEventListener("visibilitychange", () => {
     flushActivityTime(true);
+    pageWasVisible = document.visibilityState === "visible";
     lastActivityTickAt = Date.now();
   });
 
@@ -519,8 +581,11 @@ if (!config?.apiKey || !config?.databaseURL) {
     stopMemberListener = null;
     stopActivityListener?.();
     stopActivityListener = null;
+    stopSessionListener?.();
+    stopSessionListener = null;
     latestMembers = {};
     latestDailyActivity = {};
+    latestSessions = {};
     if (activityPanel) activityPanel.innerHTML = "";
     signInButton?.classList.toggle("hidden", Boolean(user));
     signOutButton?.classList.toggle("hidden", !user);
