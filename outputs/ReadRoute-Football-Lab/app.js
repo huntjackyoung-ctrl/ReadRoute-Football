@@ -270,6 +270,7 @@ let testSessionIndex = -1;
 let testQbLookPoint = null;
 let testThrowState = null;
 let testThrowFrame = null;
+let testPlayResult = null;
 let defenseAssignmentMode = "path";
 let libraryPreview = { type: "play", id: selectedPlayId };
 let libraryPreviewContext = null;
@@ -3253,6 +3254,7 @@ function testEligiblePlays() {
 function resetTestInteraction() {
   testQbLookPoint = null;
   testThrowState = null;
+  testPlayResult = null;
   if (testThrowFrame) {
     cancelAnimationFrame(testThrowFrame);
     testThrowFrame = null;
@@ -3260,7 +3262,11 @@ function resetTestInteraction() {
 }
 
 function testThrowActive() {
-  return appTab === "test" && testRoundReady && !testAnswerRevealed;
+  return appTab === "test" && testRoundReady && !testAnswerRevealed && !testPlayDead();
+}
+
+function testPlayDead() {
+  return Boolean(testPlayResult?.dead || testThrowState?.catchRun?.tackled);
 }
 
 function currentTestQbLookPoint() {
@@ -3305,6 +3311,9 @@ function handleTestThrowPointer(event) {
 function scheduleTestThrowRender() {
   if (testThrowFrame) return;
   const tick = () => {
+    if (!animationPlayback && testThrowState && !testThrowState.resolved) {
+      breakTestDefenseOnThrow(1 / 60);
+    }
     if (!animationPlayback && completedTestCatchActive()) {
       advanceTestCatchRun(1 / 60);
       rallyTestDefenseToBall(1 / 60);
@@ -3352,6 +3361,12 @@ function resolveTestCatchTackle(ballPoint = testThrowState?.catchRun?.current) {
   if (!tackler) return false;
   testThrowState.catchRun.tackled = true;
   testThrowState.catchRun.tacklerId = tackler.id;
+  testPlayResult = {
+    dead: true,
+    label: "Tackled",
+    point: { ...ballPoint },
+    className: "breakup"
+  };
   testThrowState.catchRun.current = {
     ...ballPoint,
     x: (ballPoint.x + tackler.point.x) / 2,
@@ -3361,6 +3376,68 @@ function resolveTestCatchTackle(ballPoint = testThrowState?.catchRun?.current) {
   const tacklerLabel = currentDefense().labels[tackler.id] || tackler.id;
   els.testStatus.textContent = `${offenseLabel(id)} tackled by ${tacklerLabel}.`;
   return true;
+}
+
+function defenderLabel(id) {
+  return currentDefense().labels?.[id] || id;
+}
+
+function isDefensiveLinePlayer(id) {
+  return /(^|[^A-Z])(DE|DT|NT|DL|EDGE)([^A-Z]|$)/i.test(defenderLabel(id));
+}
+
+function currentTestThrowLandingPoint() {
+  if (!testThrowState || testThrowState.resolved) return null;
+  return testThrowState.targetMode === "receiver" && testThrowState.receiverId
+    ? animationState?.offense?.[testThrowState.receiverId] || testThrowState.target
+    : testThrowState.target;
+}
+
+function shouldDefenderBreakOnThrow(id, current, landingPoint, qbPoint) {
+  if (!landingPoint || isDefensiveLinePlayer(id)) return false;
+  const distanceToBall = Math.hypot(landingPoint.x - current.x, landingPoint.y - current.y);
+  const laneDistance = pointLineDistance(current, qbPoint, landingPoint);
+  const inThrowWindow = distanceToBall <= 215 || laneDistance <= 58;
+  const canSeeIt = current.y < lineOfScrimmage + 25;
+  return inThrowWindow && canSeeIt;
+}
+
+function breakDefenderOnThrow(id, current, landingPoint, deltaSeconds, urgency = 1) {
+  const direction = vectorToward(current, landingPoint);
+  const distance = Math.hypot(landingPoint.x - current.x, landingPoint.y - current.y);
+  const breakSpeed = Math.min(260, 145 + (distance * .4)) * urgency;
+  const step = Math.min(distance, breakSpeed * Math.max(.008, deltaSeconds));
+  return {
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (direction.x * step))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, current.y + (direction.y * step)))
+  };
+}
+
+function resolveTestQbSack(defenderId) {
+  if (testPlayDead() || testThrowState) return false;
+  const qbPoint = animationState?.offense?.QB || offensePosition("QB");
+  testPlayResult = {
+    dead: true,
+    label: "Sack",
+    point: { ...qbPoint },
+    className: "interception",
+    defenderId
+  };
+  const rusherLabel = defenderLabel(defenderId);
+  els.testStatus.textContent = `QB sacked by ${rusherLabel}.`;
+  return true;
+}
+
+function rushDefenderToQb(id, current, qbPoint, deltaSeconds, blocked = true) {
+  const direction = vectorToward(current, qbPoint);
+  const distance = Math.hypot(qbPoint.x - current.x, qbPoint.y - current.y);
+  const pocketWall = blocked ? 46 : 16;
+  const rushSpeed = blocked ? 62 : 180;
+  const step = Math.min(Math.max(0, distance - pocketWall), rushSpeed * Math.max(.008, deltaSeconds));
+  return {
+    x: Math.max(fieldPadding, Math.min(fieldWidth - fieldPadding, current.x + (direction.x * step))),
+    y: Math.max(fieldPadding, Math.min(fieldHeight - fieldPadding, current.y + (direction.y * step)))
+  };
 }
 
 function rallyDefenderToBall(id, current, ballPoint, deltaSeconds, urgency = 1) {
@@ -3386,6 +3463,26 @@ function rallyTestDefenseToBall(deltaSeconds) {
       animationPlayback.defenderEyes[id] = {
         facing: vectorToward(rallied, ballPoint),
         mode: "rally",
+        targetId: testThrowState.receiverId || ""
+      };
+    }
+  });
+}
+
+function breakTestDefenseOnThrow(deltaSeconds) {
+  const landingPoint = currentTestThrowLandingPoint();
+  if (!landingPoint) return;
+  animationState ||= { offense: {}, defense: {} };
+  const qbPoint = animationState.offense?.QB || offensePosition("QB");
+  const defenders = Object.entries(animationState.defense || currentDefenseEditorPositions());
+  defenders.forEach(([id, current]) => {
+    if (!shouldDefenderBreakOnThrow(id, current, landingPoint, qbPoint)) return;
+    const broken = breakDefenderOnThrow(id, current, landingPoint, deltaSeconds, 1);
+    animationState.defense[id] = broken;
+    if (animationPlayback) {
+      animationPlayback.defenderEyes[id] = {
+        facing: vectorToward(broken, landingPoint),
+        mode: "break",
         targetId: testThrowState.receiverId || ""
       };
     }
@@ -3947,9 +4044,9 @@ function appendSegmentSpeedControl(handle, point) {
 }
 
 function renderTestInteractionOverlay() {
-  if (!testThrowActive()) return;
+  if (appTab !== "test" || !testRoundReady || testAnswerRevealed) return;
   const qbPoint = animationState?.offense?.QB || offensePosition("QB");
-  if (testQbLookPoint) {
+  if (testQbLookPoint && !testPlayDead()) {
     els.routes.append(svgEl("line", {
       class: "qb-look-line",
       x1: qbPoint.x,
@@ -3963,6 +4060,17 @@ function renderTestInteractionOverlay() {
       cy: testQbLookPoint.y,
       r: 6
     }));
+  }
+  if (testPlayResult?.dead && !testThrowState) {
+    const resultText = svgEl("text", {
+      class: `throw-result ${testPlayResult.className || "breakup"}`,
+      x: testPlayResult.point.x,
+      y: testPlayResult.point.y - 34,
+      "text-anchor": "middle"
+    });
+    resultText.textContent = testPlayResult.label;
+    els.routes.append(resultText);
+    return;
   }
   if (!testThrowState) return;
   const elapsed = (performance.now() - testThrowState.startedAt) / 1000;
@@ -7159,6 +7267,9 @@ function createDefenderAiProfile(start, zone, manTarget = null, realism = defaul
     safetyChoice: Math.random(),
     safetyModeRoll: Math.random(),
     settleNoise: Math.random(),
+    zonePriority: Math.max(.55, Math.min(1, .62 + (discipline * .22) + (awareness * .18) - (mistakes * .16) + (Math.random() * .08))),
+    assignmentMistake: Math.random() < Math.max(.015, Math.min(.32, (mistakes * .32) + ((1 - discipline) * .08))),
+    routePrioritySeed: Math.random(),
     landmarkX: (Math.random() - .5) * 42,
     landmarkY: (Math.random() - .5) * 26,
     leverageNoise: (Math.random() - .5) * 34,
@@ -7357,9 +7468,17 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
   const read = receiver.read || receiverRouteRead(receiver);
   const movingIntoZone = receiver.zoneDistancePrevious - distance;
   const profile = state.profile || {};
+  const testMode = Boolean(profile.testMode);
+  const zonePriority = profile.zonePriority || .72;
+  const clearlyInZone = distance <= (style.isDeepSafety ? 1.5 : 1.22);
+  const outsideZone = distance > (style.isDeepSafety ? 1.9 : 1.5);
   const technique = normalizeDefenderTechnique(state.technique);
   const visionInfo = vision || receiver.vision || { score: 1, clear: true, peripheral: false };
   let score = (1.45 - Math.min(1.45, distance)) * 80;
+  if (testMode) {
+    score += clearlyInZone ? 30 + (zonePriority * 28) : 0;
+    score -= outsideZone && !profile.assignmentMistake ? 34 + (zonePriority * 24) : 0;
+  }
   score += Math.min(30, Math.max(-12, movingIntoZone * 125));
   score += Math.min(24, read.verticalSpeed * .16);
   score += (visionInfo.score - .5) * (style.isDeepSafety ? 34 : 28);
@@ -7413,8 +7532,11 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
     ((profile.choiceNoise || .5) * 999)
     + (receiverIndex * 3.71)
     + ((profile.repId || "").length * .37)
+    + ((profile.routePrioritySeed || .5) * 73)
   );
-  const noiseWindow = 20 + ((profile.mistakeRate || 0) * 34) + ((1 - (profile.awareness || .7)) * 24);
+  const noiseWindow = testMode
+    ? 8 + ((profile.mistakeRate || 0) * 30) + ((1 - (profile.awareness || .7)) * 14)
+    : 20 + ((profile.mistakeRate || 0) * 34) + ((1 - (profile.awareness || .7)) * 24);
   score += repNoise * noiseWindow;
   return score;
 }
@@ -7452,6 +7574,7 @@ function moveZoneDefender(
   const { radii, isDeepSafety, isFlatDefender, isCurlFlat, isHook } = style;
   const profile = state.profile || createDefenderAiProfile(state.start, zone);
   state.profile = profile;
+  profile.testMode = Boolean(playIntent?.testMode);
   state.body ||= initializeBodyState(isDeepSafety ? "backpedal" : "shuffle");
   state.repId ||= profile.repId || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const technique = normalizeDefenderTechnique(state.technique);
@@ -7515,11 +7638,11 @@ function moveZoneDefender(
       ? 2.45
       : 1.85;
   const visionPullChance = Math.min(
-    .76,
-    .12
-      + ((profile.aggressiveness || .5) * .34)
-      + ((profile.mistakeRate || 0) * .42)
-      + ((1 - (profile.discipline || .7)) * .3)
+    profile.testMode ? .34 : .76,
+    (profile.testMode ? .05 : .12)
+      + ((profile.aggressiveness || .5) * (profile.testMode ? .18 : .34))
+      + ((profile.mistakeRate || 0) * (profile.testMode ? .34 : .42))
+      + ((1 - (profile.discipline || .7)) * (profile.testMode ? .16 : .3))
   );
   const threats = receiverCandidates
     .filter(receiver => {
@@ -7535,7 +7658,12 @@ function moveZoneDefender(
       const visiblePull = receiver.vision?.clear
         && receiver.zoneDistance <= visionPullLimit
         && routeCanPullEyes
-        && (profile.wrongChoice < visionPullChance || profile.eyes === "receiver" || profile.eyes === "nearest");
+        && (
+          (!profile.testMode && (profile.eyes === "receiver" || profile.eyes === "nearest"))
+          || profile.assignmentMistake
+          || emptyZoneFindWork
+          || profile.wrongChoice < visionPullChance
+        );
       if (findWorkPull) {
         receiver.findWorkPull = true;
         receiver.threatScore += (isFlatDefender || isCurlFlat ? 42 : 28)
@@ -8051,6 +8179,7 @@ function previewMovement(scope) {
           routeDuration,
           repDelay,
           repTempo,
+          passRushDelay: 4 + (Math.random() * 2),
           manTarget,
           zoneAssignment,
           manState: {
@@ -8123,6 +8252,14 @@ function previewMovement(scope) {
     )
   );
   const totalDuration = maxMotionDuration + maxPostSnapDuration;
+  const testSackDeadline = scope === "test"
+    ? maxMotionDuration + Math.max(
+        0,
+        ...defensePaths
+          .filter(path => isDefensiveLinePlayer(path.id))
+          .map(path => path.passRushDelay || 0)
+      )
+    : 0;
   animationPlayback = {
     scope,
     paused: false,
@@ -8175,7 +8312,7 @@ function previewMovement(scope) {
     });
     const coverageClaims = new Map();
     const framePlayIntent = scope === "test"
-      ? { ...activePlayIntent, qbLookPoint: currentTestQbLookPoint() }
+      ? { ...activePlayIntent, qbLookPoint: currentTestQbLookPoint(), testMode: true }
       : activePlayIntent;
     if (animateDefense) {
       defensePaths.forEach(({
@@ -8185,6 +8322,7 @@ function previewMovement(scope) {
         routeDuration,
         repDelay,
         repTempo,
+        passRushDelay,
         manTarget,
         zoneAssignment,
         manState,
@@ -8193,6 +8331,24 @@ function previewMovement(scope) {
         const postSnapElapsed = elapsed - maxMotionDuration;
         const defenderElapsed = postSnapElapsed - repDelay;
         const defenderDelta = deltaSeconds * repTempo;
+        if (scope === "test" && testPlayDead()) {
+          return;
+        }
+        if (scope === "test" && testThrowState && !testThrowState.resolved) {
+          const landingPoint = currentTestThrowLandingPoint();
+          const qbPoint = animationState.offense.QB || offensePosition("QB");
+          const current = animationState.defense[id] || start;
+          if (shouldDefenderBreakOnThrow(id, current, landingPoint, qbPoint)) {
+            const broken = breakDefenderOnThrow(id, current, landingPoint, defenderDelta, repTempo);
+            animationState.defense[id] = broken;
+            animationPlayback.defenderEyes[id] = {
+              facing: vectorToward(broken, landingPoint),
+              mode: "break",
+              targetId: testThrowState.receiverId || ""
+            };
+            return;
+          }
+        }
         if (scope === "test" && completedTestCatchActive()) {
           const ballPoint = testThrowState.catchRun.current;
           const current = animationState.defense[id] || start;
@@ -8203,6 +8359,27 @@ function previewMovement(scope) {
             mode: "rally",
             targetId: testThrowState.receiverId || ""
           };
+          return;
+        }
+        if (scope === "test"
+          && isDefensiveLinePlayer(id)
+          && postSnapElapsed >= 0
+          && !testThrowState
+          && !testPlayDead()) {
+          const qbPoint = animationState.offense.QB || offensePosition("QB");
+          const current = animationState.defense[id] || start;
+          const sackNow = postSnapElapsed >= passRushDelay;
+          const rushed = rushDefenderToQb(id, current, qbPoint, defenderDelta, !sackNow);
+          animationState.defense[id] = sackNow ? {
+            x: (rushed.x + qbPoint.x) / 2,
+            y: (rushed.y + qbPoint.y) / 2
+          } : rushed;
+          animationPlayback.defenderEyes[id] = {
+            facing: vectorToward(animationState.defense[id], qbPoint),
+            mode: sackNow ? "sack" : "rush",
+            targetId: "QB"
+          };
+          if (sackNow) resolveTestQbSack(id);
           return;
         }
         if (manTarget) {
@@ -8347,7 +8524,7 @@ function previewMovement(scope) {
     renderDefense();
     const keepAnimatingTestCatch = scope === "test" && completedTestCatchActive();
     const keepAnimatingTestThrow = scope === "test" && testThrowState && !testThrowState.resolved;
-    if (elapsed < totalDuration || keepAnimatingTestCatch || keepAnimatingTestThrow) {
+    if (!testPlayDead() && (elapsed < Math.max(totalDuration, testSackDeadline) || keepAnimatingTestCatch || keepAnimatingTestThrow)) {
       animationFrame = requestAnimationFrame(animate);
     } else {
       animationFrame = null;
