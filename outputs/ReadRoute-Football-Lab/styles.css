@@ -2843,6 +2843,149 @@ select:focus,
   background: rgba(201,255,74,.72);
 }
 
+/* Contrast cleanup for the dark redesign. */
+.panel,
+.field-section,
+.playbook-library,
+.library-preview,
+.workspace-share-dialog,
+.route-toolbar,
+.run-toolbar,
+.test-toolbar,
+.run-play-browser,
+.test-defense-menu,
+.test-play-menu,
+.folder-picker-panel {
+  color: #e8f2ec;
+}
+
+.panel p,
+.field-section p,
+.workspace-share-dialog p,
+.library-heading > div > p:last-child,
+.library-heading > div > p.autosave-status,
+.library-field-standard,
+.library-preview-note,
+.coverage-tell,
+.route-option-help,
+.multi-select-help,
+.field-note,
+.empty-folder,
+.library-empty,
+.folder-other-files > summary,
+.run-browser-folder summary small,
+.test-play-formation > summary small,
+.library-folder summary small,
+.custom-library-folder summary small,
+.workspace-activity-heading p,
+.workspace-activity-periods span,
+.workspace-member small,
+.route-help,
+.scenario-status,
+.scenario-zone-size,
+.defense-path-card p,
+.defense-alignment-progress {
+  color: #a9bbb2;
+}
+
+.route-toolbar > div,
+.toggle-row,
+.route-option-heading strong,
+.route-option-file span,
+.assignment-row,
+.defense-label-row span,
+.defense-assignment-label,
+.folder-picker-panel-heading h3,
+.folder-picker-action,
+.folder-picker-panel label,
+.folder-pick-card,
+.folder-pick-card strong,
+.folder-pick-card-body,
+.workspace-activity-member strong,
+.workspace-member span,
+.library-file strong,
+.custom-library-file strong,
+.run-browser-play strong,
+.test-play-formation > summary label,
+.test-defense-picker > details > summary,
+.test-play-picker > details > summary,
+.run-play-browser > summary,
+.run-browser-folder summary,
+.coverage-button strong,
+.route-read,
+.read-card h3 {
+  color: #eefbf3;
+}
+
+.library-file span,
+.custom-library-file span,
+.run-browser-play span,
+.coverage-button small,
+.route-read div,
+.playbook-search label,
+.realism-slider-grid label,
+.field-standard-control,
+.assignment-heading,
+.defense-label-heading,
+.all-route-options-title {
+  color: #93a89e;
+}
+
+.library-file:hover *,
+.library-file.active *,
+.folder-play:hover,
+.folder-play.active,
+.run-browser-play:hover *,
+.run-browser-play.active *,
+.test-play-option:hover,
+.test-defense-option:hover,
+.route-defense-choice:hover,
+.folder-picker-action:hover,
+.coverage-button.active *,
+.mode-tab.active,
+.create-subtab.active,
+.playbook-tab.active,
+.board-mode-button.active,
+.path-type-button.active,
+.route-select-button.active,
+.route-tool-button.active,
+.button-primary,
+.save-play-button,
+.preview-movement-button {
+  color: #06120d;
+}
+
+.test-defense-picker > details,
+.test-play-picker > details,
+.test-defense-menu,
+.test-play-menu,
+.run-browser-folder,
+.test-play-formation,
+.route-defense-multi,
+.playbook-tree,
+.formation-folder,
+.library-column,
+.library-folder,
+.custom-library-folder,
+.folder-picker-action,
+.folder-pick-card,
+.route-read {
+  border-color: rgba(201,255,74,.12);
+  background: rgba(6, 18, 13, .72);
+}
+
+.route-read span,
+.library-folder-icon,
+.library-file-icon,
+.fixed-assignment-label {
+  color: #06120d;
+}
+
+option {
+  color: #ecf8f0;
+  background: #07140f;
+}
+
 @media (max-width: 1100px) {
   .workspace { grid-template-columns: 240px 1fr; }
   .defense-panel { grid-column: 1 / -1; }
