@@ -6756,6 +6756,7 @@ function playInfluence(playIntent = defaultPlayIntent(), profile = {}) {
 
 function chooseSafetyMode(profile, verticalThreatCount, hasDeepHelp, technique = "balanced", claimedByOther = false) {
   if (verticalThreatCount < 2) return "attach";
+  if (!hasDeepHelp && technique !== "matchVertical") return "overplay-deepest";
   if (technique === "keepDepth" || technique === "midpoint") return "midpoint";
   if (technique === "matchVertical") return profile.safetyChoice < .5 ? "attach-left" : "attach-right";
   const roll = profile.safetyModeRoll || 0;
@@ -7003,6 +7004,7 @@ function moveZoneDefender(
     x: zone.x + (profile.landmarkX || 0),
     y: zone.y + (profile.landmarkY || 0)
   };
+  const roofDefender = isDeepSafety && !hasDeepHelp;
   const reactionTime = profile.reaction
     + (influence.delayedRouteRead ? .12 * (1 - profile.discipline) : 0)
     + (influence.flatFoot ? .1 + ((1 - (profile.awareness || .7)) * .14) : 0);
@@ -7117,10 +7119,11 @@ function moveZoneDefender(
   if (!runFitBite && elapsed >= reactionTime && isDeepSafety) {
     let verticalThreats = receiverCandidates
       .filter(receiver =>
-        receiver.y <= deepThreatLine + 80
+        receiver.y <= deepThreatLine + (roofDefender ? 135 : 80)
         && receiver.vy < 18
         && (
-          Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
+          roofDefender
+          || Math.abs(receiver.x - readLandmark.x) <= radii.x * 1.65
           || (receiver.vision?.clear && receiver.zoneDistance <= 2.15)
         )
       )
@@ -7129,7 +7132,10 @@ function moveZoneDefender(
         if (Math.abs(depthDiff) > 18) return depthDiff;
         return (b.vision?.score || 0) - (a.vision?.score || 0);
       });
-    if (influence.wrongChoice && verticalThreats.length > 1) {
+    const rareRoofBust = roofDefender
+      && influence.wrongChoice
+      && (profile.wrongChoice || 0) < Math.max(.015, (profile.mistakeRate || 0) * .16);
+    if (influence.wrongChoice && !roofDefender && verticalThreats.length > 1) {
       const second = verticalThreats.find(receiver => receiver.y <= verticalThreats[0].y + 65);
       if (second) verticalThreats = [second, ...verticalThreats.filter(receiver => receiver.id !== second.id)];
     }
@@ -7172,37 +7178,42 @@ function moveZoneDefender(
       const targetX = safetyMode === "midpoint"
         ? splitX
         : selectedThreat.x + ((profile.leverageNoise || 0) * .25);
-      const targetCushion = safetyMode === "midpoint"
+      const roofCushion = Math.max(profile.cushion + 16, 52);
+      const targetCushion = roofDefender
+        ? roofCushion
+        : safetyMode === "midpoint"
         ? profile.cushion
         : safetyMode === "late"
           ? profile.cushion * .35
           : profile.cushion * .9;
       const downhillMistake = influence.falseStep && elapsed < reactionTime + .42;
       const frozenEyes = influence.flatFoot && elapsed < reactionTime + .42;
-      const lateSafety = downhillMistake || frozenEyes || safetyMode === "late";
+      const lateSafety = roofDefender
+        ? rareRoofBust && (downhillMistake || frozenEyes || safetyMode === "late")
+        : downhillMistake || frozenEyes || safetyMode === "late";
       const cushionToThreat = selectedThreat.y - state.y;
       const verticalHasDeclared = selectedThreat.y < state.start.y - 34
-        || cushionToThreat < Math.max(28, profile.cushion * .62)
+        || cushionToThreat < Math.max(roofDefender ? 44 : 28, targetCushion * (roofDefender ? .92 : .62))
         || elapsed > reactionTime + .72;
       const pedalFirst = !lateSafety
         && safetyMode !== "midpoint"
         && !verticalHasDeclared
         && technique !== "matchVertical";
       carryingDeepThreat = !lateSafety && !pedalFirst;
-      mode = downhillMistake || safetyMode === "late"
+      mode = lateSafety
         ? "recover"
-        : safetyMode === "midpoint" || frozenEyes || pedalFirst
+        : safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
           ? "midpoint"
           : "carry";
       state.deepThreatId = selectedThreat.id;
       state.primaryThreatId = selectedThreat.id;
-      const pedalDepth = 24 + Math.min(32, Math.max(0, state.start.y - selectedThreat.y) * .28);
-      const pedalCapY = Math.min(state.start.y - pedalDepth, selectedThreat.y - Math.max(28, targetCushion * .82));
+      const pedalDepth = (roofDefender ? 38 : 24) + Math.min(40, Math.max(0, state.start.y - selectedThreat.y) * (roofDefender ? .42 : .28));
+      const pedalCapY = Math.min(state.start.y - pedalDepth, selectedThreat.y - Math.max(roofDefender ? 46 : 28, targetCushion * (roofDefender ? .95 : .82)));
       target = {
         x: readLandmark.x + ((targetX - readLandmark.x) * (
           safetyMode === "midpoint" ? (hasDeepHelp ? .52 : .76) : .9
         )),
-        y: safetyMode === "midpoint" || frozenEyes || pedalFirst
+        y: safetyMode === "midpoint" || (frozenEyes && !roofDefender) || pedalFirst
           ? Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
           : Math.min(deepThreatLine, selectedThreat.y - targetCushion)
       };
@@ -7213,7 +7224,27 @@ function moveZoneDefender(
     }
   }
   if (!runFitBite && !carryingDeepThreat && elapsed >= reactionTime && threats.length) {
-    const primary = committedThreat(threats, state, profile, influence, elapsed, 34) || threats[0];
+    const roofThreats = roofDefender
+      ? threats.filter(threat =>
+          threat.read.isVertical
+          || threat.y <= state.start.y + 54
+          || threat.read.routeDepth > 82
+        )
+      : threats;
+    if (roofDefender && !roofThreats.length) {
+      state.primaryThreatId = null;
+    }
+    const primary = roofThreats.length
+      ? committedThreat(roofThreats, state, profile, influence, elapsed, 24) || roofThreats[0]
+      : null;
+    if (!primary) {
+      if (roofDefender) {
+        target = {
+          x: state.start.x + ((readLandmark.x - state.start.x) * .18),
+          y: Math.min(state.start.y - 26, deepThreatLine)
+        };
+      }
+    } else {
     state.primaryThreatId = primary.id;
     coverageClaims.set(primary.id, (coverageClaims.get(primary.id) || 0) + 1);
     const primaryOutsideZone = primary.zoneDistance > 1.08;
@@ -7231,19 +7262,20 @@ function moveZoneDefender(
       const attach = technique === "matchVertical"
         || (technique !== "keepDepth" && technique !== "midpoint" && (primaryOutsideZone || (profile.safetyChoice > .42 && threats.length > 1)));
       const cushionToThreat = primary.y - state.y;
+      const roofCushion = roofDefender ? Math.max(profile.cushion + 16, 52) : profile.cushion;
       const verticalHasDeclared = primary.y < state.start.y - 34
-        || cushionToThreat < Math.max(28, profile.cushion * .62)
+        || cushionToThreat < Math.max(roofDefender ? 44 : 28, roofCushion * (roofDefender ? .92 : .62))
         || elapsed > reactionTime + .72;
       const pedalFirst = attach && !verticalHasDeclared && technique !== "matchVertical";
       mode = attach && !pedalFirst ? "carry" : "midpoint";
-      const pedalDepth = 24 + Math.min(32, Math.max(0, state.start.y - primary.y) * .28);
-      const pedalCapY = Math.min(state.start.y - pedalDepth, primary.y - Math.max(28, profile.cushion * .74));
+      const pedalDepth = (roofDefender ? 38 : 24) + Math.min(40, Math.max(0, state.start.y - primary.y) * (roofDefender ? .42 : .28));
+      const pedalCapY = Math.min(state.start.y - pedalDepth, primary.y - Math.max(roofDefender ? 46 : 28, roofCushion * (roofDefender ? .95 : .74)));
       target = {
         x: attach && !pedalFirst
           ? primary.x + ((profile.leverageNoise || 0) * .2)
           : readLandmark.x + ((primary.x - readLandmark.x + (profile.leverageNoise || 0)) * .48),
         y: attach && !pedalFirst
-          ? Math.min(deepThreatLine, primary.y - profile.cushion)
+          ? Math.min(deepThreatLine, primary.y - roofCushion)
           : Math.min(state.start.y, pedalFirst ? pedalCapY : deepThreatLine)
       };
     } else {
@@ -7294,6 +7326,7 @@ function moveZoneDefender(
         };
       }
     }
+    }
   } else if (!threats.length && state.primaryThreatId) {
     state.primaryThreatId = null;
   }
@@ -7302,7 +7335,7 @@ function moveZoneDefender(
     : null;
   const pulledByVision = assignedThreat?.zoneDistance > 1.08
     && (assignedThreat?.vision?.clear || assignedThreat?.findWorkPull);
-  if (!carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
+  if (!roofDefender && !carryingDeepThreat && mode !== "carry" && mode !== "rally" && !pulledByVision) target = clampToZone(target, zone);
   if (isDeepSafety && mode !== "recover" && mode !== "bite") {
     target.y = Math.min(target.y, deepThreatLine);
     if (mode === "midpoint") target.y = Math.min(target.y, state.start.y);
@@ -7359,11 +7392,11 @@ function moveZoneDefender(
   const bodyProfile = bodyMovementProfile(state.body, nextPosture, gapX, gapY, safeDelta);
   const traffic = trafficSlowdown(state, receivers);
   const movementMultiplier = mode === "carry" || mode === "recover"
-    ? 1
+    ? (roofDefender ? 1.12 : 1)
     : mode === "run-fit"
       ? .86
       : isDeepSafety && (mode === "midpoint" || nextPosture === "backpedal")
-        ? .92
+        ? (roofDefender ? 1.08 : .92)
       : gapY < -8
         ? .68
         : Math.abs(gapX) > Math.abs(gapY) * 1.2
@@ -7375,7 +7408,7 @@ function moveZoneDefender(
       : mode === "run-fit" ? 108
       : mode === "rally" ? 120
         : mode === "wall" ? 104
-          : isDeepSafety ? 98
+          : isDeepSafety ? (roofDefender ? 124 : 98)
             : isFlatDefender ? 92
               : 86
   ) * speedBoost * movementMultiplier * bodyProfile.speed * traffic;
@@ -7393,7 +7426,7 @@ function moveZoneDefender(
       : mode === "run-fit" ? 520
       : mode === "rally" ? 540
         : mode === "wall" ? 500
-          : isDeepSafety ? 440
+          : isDeepSafety ? (roofDefender ? 560 : 440)
             : 420
   ) * speedBoost * movementMultiplier * bodyProfile.accel * traffic;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
