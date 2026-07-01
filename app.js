@@ -6452,11 +6452,15 @@ function routeMovementEyeVector(current, start, route, elapsed, speed) {
   return movementFacingVector(current, gapX, gapY);
 }
 
-function postureEyeVector(state, posture, mode, target, gapX, gapY) {
+function postureEyeVector(state, posture, mode, target, gapX, gapY, context = {}) {
+  const isDeepSafety = Boolean(context.isDeepSafety);
   if (mode === "backfield" || mode === "run-fit" || mode === "bite") {
     return vectorToward(state, backfieldReadPoint());
   }
   if (posture === "backpedal" || mode === "midpoint") {
+    return ballFacingVector(state);
+  }
+  if (mode === "carry" && !isDeepSafety) {
     return ballFacingVector(state);
   }
   if (posture === "open" || posture === "recover") {
@@ -7289,7 +7293,7 @@ function moveZoneDefender(
   }
   setDefenderEyeState(
     state,
-    eyeFacing || postureEyeVector(state, nextPosture, eyeMode, eyeTarget, gapX, gapY),
+    eyeFacing || postureEyeVector(state, nextPosture, eyeMode, eyeTarget, gapX, gapY, { isDeepSafety }),
     eyeTargetId,
     eyeMode
   );
