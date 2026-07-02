@@ -7740,20 +7740,60 @@ function receiverThreatScore(receiver, zone, state, style, hasDeepHelp, claimCou
 
 function qbLookRouteInfluence(receiver, defenderState, playIntent = {}, style = {}) {
   const lookPoint = playIntent.qbLookPoint;
-  if (!lookPoint) return 0;
   const qbPoint = animationState?.offense?.QB || offensePosition("QB");
-  const laneDistance = pointLineDistance(receiver, qbPoint, lookPoint);
-  const lookDistance = Math.hypot(receiver.x - lookPoint.x, receiver.y - lookPoint.y);
-  const closeToLook = laneDistance < 38 || lookDistance < 72;
-  if (!closeToLook) return 0;
+  const qbFlow = playIntent.qbFlowPoint || null;
+  if (!lookPoint && !qbFlow) return 0;
   const profile = defenderState.profile || {};
   const susceptibility = .18
     + ((profile.aggressiveness || .5) * .26)
     + ((1 - (profile.discipline || .7)) * .32)
     + ((profile.mistakeRate || 0) * .34);
-  const deepDiscount = style.isDeepSafety ? .35 : 1;
-  const lookStrength = Math.max(0, 1 - Math.min(1, laneDistance / 62));
-  return lookStrength * susceptibility * deepDiscount * 42;
+  const deepDiscount = style.isDeepSafety ? .3 : 1;
+  let score = 0;
+  if (lookPoint) {
+    const laneDistance = pointLineDistance(receiver, qbPoint, lookPoint);
+    const lookDistance = Math.hypot(receiver.x - lookPoint.x, receiver.y - lookPoint.y);
+    const closeToLook = laneDistance < 38 || lookDistance < 72;
+    if (closeToLook) {
+      const lookStrength = Math.max(0, 1 - Math.min(1, laneDistance / 62));
+      score += lookStrength * susceptibility * deepDiscount * 42;
+    }
+  }
+  if (qbFlow) {
+    const flowDistance = pointLineDistance(receiver, qbPoint, qbFlow);
+    const flowSide = Math.sign(qbFlow.x - qbPoint.x);
+    const receiverSide = Math.sign(receiver.x - qbPoint.x);
+    const sameFlowSide = flowSide === 0 || receiverSide === 0 || flowSide === receiverSide;
+    if (sameFlowSide && flowDistance < 96) {
+      const flowStrength = Math.max(0, 1 - Math.min(1, flowDistance / 110));
+      score += flowStrength * susceptibility * (style.isDeepSafety ? .22 : .55) * 28;
+    }
+  }
+  return score;
+}
+
+function qbFlowPointFromPlayback(playIntent = {}) {
+  if (playIntent.qbFlowPoint) return playIntent.qbFlowPoint;
+  const qbPoint = animationState?.offense?.QB || offensePosition("QB");
+  const qbStart = editorOffensePositions().QB || qbPoint;
+  const dx = qbPoint.x - qbStart.x;
+  const dy = qbPoint.y - qbStart.y;
+  if (Math.hypot(dx, dy) < 10) return null;
+  return {
+    x: qbPoint.x + dx * 3.2,
+    y: qbPoint.y + dy * 2.4
+  };
+}
+
+function receiverSettledInZone(receiver, zone, style) {
+  const speed = Math.hypot(receiver.vx || 0, receiver.vy || 0);
+  const depthOk = style.isFlatDefender || style.isCurlFlat
+    ? receiver.y > zone.y - zoneRadii(zone).y * .8
+    : true;
+  return receiver.zoneDistance <= (style.isDeepSafety ? 1.25 : 1.08)
+    && speed < 34
+    && depthOk
+    && !receiver.read.isVertical;
 }
 
 function moveZoneDefender(
@@ -7798,10 +7838,14 @@ function moveZoneDefender(
       };
       const vision = receiverVisionInfo(enriched, state, style, profile, influence, readLandmark);
       const qbLookScore = qbLookRouteInfluence(enriched, state, playIntent, style);
+      const settledScore = receiverSettledInZone(enriched, zone, style)
+        ? isDeepSafety ? 6 : isFlatDefender || isCurlFlat ? 34 : 26
+        : 0;
       return {
         ...enriched,
         qbLookScore,
         vision,
+        settledInZone: settledScore > 0,
         threatScore: receiverThreatScore(
           enriched,
           zone,
@@ -7811,7 +7855,7 @@ function moveZoneDefender(
           coverageClaims.get(receiver.id) || 0,
           receiverIndex,
           vision
-        ) + qbLookScore
+        ) + qbLookScore + settledScore
       };
     });
   state.lastSeenThreats = Object.fromEntries(
@@ -7830,6 +7874,22 @@ function moveZoneDefender(
   );
   const inZoneThreatCount = inZoneThreats.length;
   const emptyZoneFindWork = elapsed >= reactionTime && inZoneThreatCount === 0;
+  const qbFlowPoint = qbFlowPointFromPlayback(playIntent);
+  const qbFlowLean = qbFlowPoint && elapsed >= reactionTime
+    ? (() => {
+        const qbPoint = animationState?.offense?.QB || offensePosition("QB");
+        const flowDx = Math.max(-1, Math.min(1, (qbFlowPoint.x - qbPoint.x) / 180));
+        const flowDy = Math.max(-1, Math.min(1, (qbFlowPoint.y - qbPoint.y) / 150));
+        const profilePull = ((profile.aggressiveness || .5) * .42)
+          + ((1 - (profile.discipline || .7)) * .35)
+          + ((profile.mistakeRate || 0) * .22);
+        const depthGuard = isDeepSafety ? .28 : isFlatDefender || isCurlFlat ? .74 : .58;
+        return {
+          x: flowDx * 34 * profilePull * depthGuard,
+          y: flowDy * 18 * profilePull * depthGuard
+        };
+      })()
+    : null;
   const findWorkLimit = isDeepSafety
     ? 2.1
     : isFlatDefender || isCurlFlat
@@ -7905,8 +7965,8 @@ function moveZoneDefender(
     }
   } else if (elapsed > .55 && !threats.length) {
     target = {
-      x: state.start.x + ((readLandmark.x - state.start.x) * .26),
-      y: state.start.y + ((readLandmark.y - state.start.y) * (isDeepSafety ? .1 : .24))
+      x: state.start.x + ((readLandmark.x - state.start.x) * .26) + (qbFlowLean?.x || 0),
+      y: state.start.y + ((readLandmark.y - state.start.y) * (isDeepSafety ? .1 : .24)) + (qbFlowLean?.y || 0)
     };
   }
   if (runFitBite) {
@@ -8189,9 +8249,10 @@ function moveZoneDefender(
       } else if (shouldRallyFlat) {
         mode = "rally";
         const outsideLeverage = (primary.x < readLandmark.x ? 18 : -18) + ((profile.leverageNoise || 0) * .35);
+        const settledClose = primary.settledInZone ? 5 : 0;
         target = {
           x: primary.x + outsideLeverage,
-          y: primary.y - 6
+          y: primary.y - 6 + settledClose
         };
       } else if (shouldWallCrosser) {
         mode = "wall";
@@ -8212,7 +8273,7 @@ function moveZoneDefender(
         };
       } else if (singleZoneThreat) {
         mode = primary.read.isVertical ? "carry" : "rally";
-        const cushion = primary.read.isVertical ? Math.max(18, profile.cushion * .65) : 8;
+        const cushion = primary.read.isVertical ? Math.max(18, profile.cushion * .65) : primary.settledInZone ? 3 : 8;
         target = {
           x: primary.x + ((profile.leverageNoise || 0) * .16),
           y: primary.read.isVertical
@@ -8223,8 +8284,8 @@ function moveZoneDefender(
         mode = "spot";
         const lean = Math.max(.14, Math.min(.48, .22 + ((profile.aggressiveness || .5) * .18) + (profile.leanNoise || 0)));
         target = {
-          x: readLandmark.x + ((primary.x - readLandmark.x) * lean * eyePullAmount),
-          y: readLandmark.y + ((primary.y - readLandmark.y) * Math.min(.28, lean * eyePullAmount))
+          x: readLandmark.x + (qbFlowLean?.x || 0) + ((primary.x - readLandmark.x) * lean * eyePullAmount),
+          y: readLandmark.y + (qbFlowLean?.y || 0) + ((primary.y - readLandmark.y) * Math.min(.28, lean * eyePullAmount))
         };
       }
     }
@@ -8625,9 +8686,10 @@ function previewMovement(scope) {
       };
     });
     const coverageClaims = new Map();
+    const qbFlowPoint = qbFlowPointFromPlayback(activePlayIntent);
     const framePlayIntent = scope === "test"
-      ? { ...activePlayIntent, qbLookPoint: currentTestQbLookPoint(), testMode: true }
-      : activePlayIntent;
+      ? { ...activePlayIntent, qbLookPoint: currentTestQbLookPoint(), qbFlowPoint, testMode: true }
+      : { ...activePlayIntent, qbFlowPoint };
     if (animateDefense) {
       defensePaths.forEach(({
         id,
