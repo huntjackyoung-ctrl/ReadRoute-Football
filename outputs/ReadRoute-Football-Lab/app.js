@@ -1615,6 +1615,41 @@ function folderPlayPickerMarkup(folderId) {
       data-folder-included="${included ? "true" : "false"}"
     >${included ? removeLabel : addLabel}</button>
   `;
+  const playSearchResults = searchQuery
+    ? plays
+        .map(play => ({
+          play,
+          formation: formations.find(candidate => candidate.id === play.formationId)
+        }))
+        .filter(({ play, formation }) => folderPickerPlayMatches(play, formation?.name || ""))
+        .sort((a, b) => {
+          const formationCompare = (a.formation?.name || "").localeCompare(b.formation?.name || "");
+          return formationCompare || a.play.name.localeCompare(b.play.name);
+        })
+    : [];
+  const playSearchMarkup = searchQuery
+    ? `
+      <section class="folder-search-results">
+        <p class="folder-picker-heading">Matching plays</p>
+        ${playSearchResults.length
+          ? playSearchResults.map(({ play, formation }) => {
+              const key = libraryItemKey("play", play.id);
+              const included = itemFolderIds(key).includes(folderId);
+              return `
+                <div class="folder-pick-row folder-search-result-row">
+                  <span class="folder-pick-badge">Play</span>
+                  <span class="folder-result-name">
+                    <strong>${escapeHtml(formation?.name || "No formation")}</strong>
+                    <em>${escapeHtml(play.name)}</em>
+                  </span>
+                  ${folderItemButton(key, included, "Add", "Remove")}
+                </div>
+              `;
+            }).join("")
+          : `<p class="library-empty">No plays match that search.</p>`}
+      </section>
+    `
+    : "";
 
   const formationCards = formations.map(formation => {
     const formationKey = libraryItemKey("formation", formation.id);
@@ -1640,7 +1675,10 @@ function folderPlayPickerMarkup(folderId) {
       <details class="folder-pick-card" data-folder-picker-state="${pickerKey}"${folderPickerOpenAttribute(pickerKey, Boolean(searchQuery))}>
         <summary class="folder-pick-card-header">
           <span class="folder-pick-badge">Formation</span>
-          <strong>${escapeHtml(formation.name)}</strong>
+          <span class="folder-pick-title">
+            <strong>${escapeHtml(formation.name)}</strong>
+            <em>${allFormationPlays.length ? `${allFormationPlays.length} saved plays` : "No saved plays yet"}</em>
+          </span>
           <small>${selectedCount}/${allFormationPlays.length} plays</small>
           ${folderItemButton(formationKey, formationSelected, "Add Form", "Remove")}
         </summary>
@@ -1648,7 +1686,7 @@ function folderPlayPickerMarkup(folderId) {
           ${formationPlays.length ? `
             <div class="folder-pick-row all">
               <span class="folder-pick-spacer"></span>
-              <strong>${searchQuery && !formationNameMatches ? "All matching plays" : `All plays in ${escapeHtml(formation.name)}`}</strong>
+              <strong>${searchQuery && !formationNameMatches ? `All matching plays in ${escapeHtml(formation.name)}` : `All plays in ${escapeHtml(formation.name)}`}</strong>
               <button
                 type="button"
                 class="folder-picker-action ${(searchQuery && !formationNameMatches ? visibleAllSelected : allSelected) ? "is-selected" : ""}"
@@ -1664,7 +1702,10 @@ function folderPlayPickerMarkup(folderId) {
               return `
                 <div class="folder-pick-row">
                   <span class="folder-pick-badge">Play</span>
-                  <span>${escapeHtml(play.name)}</span>
+                  <span class="folder-result-name">
+                    <strong>${escapeHtml(formation.name)}</strong>
+                    <em>${escapeHtml(play.name)}</em>
+                  </span>
                   ${folderItemButton(key, included, "Add", "Remove")}
                 </div>
               `;
@@ -1692,6 +1733,7 @@ function folderPlayPickerMarkup(folderId) {
           <button class="library-action-button" data-clear-folder-picker-search ${activeFolderPickerSearch ? "" : "disabled"}>Clear</button>
         </div>
       </div>
+      ${playSearchMarkup}
       <div class="folder-picker-scroll">
         <p class="folder-picker-heading">Plays by formation</p>
         ${formationCards || `<p class="library-empty">${searchQuery ? "No plays match that search." : "No formations saved yet."}</p>`}

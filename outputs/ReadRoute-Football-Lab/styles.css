@@ -876,7 +876,7 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   background: #fff;
 }
 .folder-picker-search {
-  padding: 14px 14px 0;
+  padding: 14px 14px 10px;
 }
 .folder-picker-search label {
   display: block;
@@ -894,12 +894,19 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 }
 .folder-picker-search input {
   width: 100%;
-  padding: 10px 12px;
+  padding: 12px 13px;
   border: 1px solid var(--line);
   border-radius: 7px;
   color: var(--ink);
   background: #fff;
-  font: 800 13px Inter, sans-serif;
+  font: 850 13px Inter, sans-serif;
+}
+.folder-search-results {
+  margin: 0 14px 4px;
+  padding: 10px;
+  border: 1px solid #dfe7cf;
+  border-radius: 12px;
+  background: #fbfdf6;
 }
 .folder-picker-scroll {
   padding: 14px;
@@ -949,8 +956,28 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
 .folder-pick-card[open] > .folder-pick-card-header::before { content: "-"; }
 .folder-pick-card-header strong {
   color: var(--ink);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.35;
+}
+.folder-pick-title,
+.folder-result-name {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+.folder-pick-title em,
+.folder-result-name em {
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 850;
+  line-height: 1.25;
+}
+.folder-result-name strong {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 950;
+  line-height: 1.2;
 }
 .folder-pick-card-header small {
   color: var(--muted);
@@ -963,8 +990,8 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   gap: 0;
 }
 .folder-pick-row {
-  min-height: 46px;
-  padding: 10px 14px;
+  min-height: 52px;
+  padding: 11px 14px;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 12px;
@@ -972,6 +999,14 @@ body.defense-alignment-mode [data-board-mode="draw"] { display: none; }
   border-top: 1px solid #eef1e5;
   color: var(--ink);
   background: #fff;
+}
+.folder-search-result-row {
+  border: 1px solid #e3ead6;
+  border-radius: 10px;
+  background: #fff;
+}
+.folder-search-result-row + .folder-search-result-row {
+  margin-top: 8px;
 }
 .folder-pick-row.all {
   grid-template-columns: 66px minmax(0, 1fr) auto;
@@ -3181,6 +3216,81 @@ option {
 .folder-membership-editor summary {
   color: #dfffe8;
   background: rgba(255,255,255,.035);
+}
+
+.folder-picker-panel .folder-membership-list {
+  color: #edf8f1;
+}
+
+.folder-picker-panel .folder-picker-search {
+  border-bottom: 1px solid rgba(201,255,74,.1);
+  background: rgba(255,255,255,.025);
+}
+
+.folder-picker-panel .folder-picker-search label,
+.folder-picker-panel .folder-picker-heading {
+  color: #bad0c4;
+}
+
+.folder-picker-panel .folder-picker-search input {
+  color: #f5fff7;
+  border-color: rgba(201,255,74,.24);
+  background: rgba(2, 10, 6, .82);
+}
+
+.folder-picker-panel .folder-picker-search input::placeholder {
+  color: #7f9489;
+}
+
+.folder-search-results,
+.folder-picker-panel .folder-pick-card {
+  border-color: rgba(201,255,74,.16);
+  background: rgba(7, 18, 13, .86);
+}
+
+.folder-picker-panel .folder-pick-card-header {
+  color: #f5fff7;
+  background: linear-gradient(90deg, rgba(201,255,74,.12), rgba(255,255,255,.035));
+}
+
+.folder-picker-panel .folder-pick-card-header strong,
+.folder-picker-panel .folder-result-name strong,
+.folder-picker-panel .folder-pick-row strong {
+  color: #f6fff8;
+}
+
+.folder-picker-panel .folder-pick-card-header small,
+.folder-picker-panel .folder-pick-title em,
+.folder-picker-panel .folder-result-name em {
+  color: #b7cfc2;
+}
+
+.folder-picker-panel .folder-pick-row {
+  color: #ecf8f0;
+  border-top-color: rgba(201,255,74,.1);
+  background: rgba(255,255,255,.035);
+}
+
+.folder-picker-panel .folder-pick-row.all,
+.folder-picker-panel .folder-search-result-row {
+  background: rgba(201,255,74,.065);
+}
+
+.folder-picker-panel .folder-pick-badge {
+  color: #06120d;
+  background: linear-gradient(135deg, var(--lime), #9cff70);
+}
+
+.folder-picker-panel .folder-picker-action {
+  color: #eaffef;
+  border-color: rgba(201,255,74,.24);
+  background: rgba(255,255,255,.045);
+}
+
+.folder-picker-panel .folder-picker-action.is-selected {
+  color: #ffd6c9;
+  border-color: rgba(255,149,116,.38);
+  background: rgba(150, 42, 24, .24);
 }
 
 @media (max-width: 1100px) {
