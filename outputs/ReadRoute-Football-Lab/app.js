@@ -3465,7 +3465,7 @@ function shouldDefenderBreakOnThrow(id, current, landingPoint, qbPoint) {
   if (!landingPoint || isDefensiveLinePlayer(id)) return false;
   const distanceToBall = Math.hypot(landingPoint.x - current.x, landingPoint.y - current.y);
   const laneDistance = pointLineDistance(current, qbPoint, landingPoint);
-  const inThrowWindow = distanceToBall <= 215 || laneDistance <= 58;
+  const inThrowWindow = distanceToBall <= 245 || laneDistance <= 66;
   const canSeeIt = current.y < lineOfScrimmage + 25;
   return inThrowWindow && canSeeIt;
 }
@@ -3485,10 +3485,10 @@ function breakDefenderOnThrow(id, current, landingPoint, deltaSeconds, urgency =
   const direction = vectorToward(current, landingPoint);
   const distance = Math.hypot(landingPoint.x - current.x, landingPoint.y - current.y);
   const receiverTopSpeed = 115;
-  const maxSpeed = receiverTopSpeed * urgency;
+  const maxSpeed = receiverTopSpeed * Math.min(1.18, urgency * 1.08);
   const desiredVx = direction.x * maxSpeed;
   const desiredVy = direction.y * maxSpeed;
-  const acceleration = 430 * urgency;
+  const acceleration = 520 * urgency;
   const velocityChange = Math.hypot(desiredVx - state.vx, desiredVy - state.vy);
   const maxVelocityChange = acceleration * safeDelta;
   const velocityRatio = velocityChange
@@ -3623,6 +3623,21 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
   const throwDistance = Math.hypot(targetPoint.x - qbPoint.x, targetPoint.y - qbPoint.y);
   const nearestDistance = nearest?.distance ?? 999;
   const secondDistance = second?.distance ?? 999;
+  const contestThreat = defenders
+    .map(defender => ({
+      ...defender,
+      targetDistance: Math.hypot(defender.point.x - targetPoint.x, defender.point.y - targetPoint.y),
+      laneDistance: pointLineDistance(defender.point, qbPoint, targetPoint)
+    }))
+    .filter(defender =>
+      defender.targetDistance < 42
+      || (defender.targetDistance < 62 && defender.laneDistance < 36)
+    )
+    .sort((a, b) => {
+      const aScore = a.targetDistance + (a.laneDistance * .45);
+      const bScore = b.targetDistance + (b.laneDistance * .45);
+      return aScore - bScore;
+    })[0];
   const passingLaneThreat = defenders
     .map(defender => ({
       ...defender,
@@ -3637,13 +3652,14 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
     }
     return { label: "Incomplete", className: "breakup", defenderId: "", receiverId: null };
   }
-  if (nearestDistance > 38 && !passingLaneThreat) {
+  if (nearestDistance > 38 && !passingLaneThreat && !contestThreat) {
     return { label: "Complete", className: "complete", defenderId: "", receiverId: catchTarget.id };
   }
   let risk = 0;
-  risk += nearestDistance < 13 ? 72 : nearestDistance < 22 ? 42 : nearestDistance < 34 ? 20 : 0;
+  risk += nearestDistance < 13 ? 78 : nearestDistance < 22 ? 48 : nearestDistance < 34 ? 26 : 0;
   risk += secondDistance < 24 ? 14 : 0;
   risk += passingLaneThreat ? 16 : 0;
+  risk += contestThreat ? contestThreat.targetDistance < 24 ? 24 : 14 : 0;
   risk += throwDistance > 360 ? 10 : throwDistance > 250 ? 5 : 0;
   const routeDepth = Math.max(0, lineOfScrimmage - catchTarget.point.y);
   risk += routeDepth > 210 ? 10 : 0;
@@ -3651,8 +3667,8 @@ function evaluateThrowOutcome(receiverId, targetPoint) {
   if (nearestDistance < 11 && roll < risk * .42) {
     return { label: "Intercepted", className: "interception", defenderId: nearest.id, receiverId: catchTarget.id };
   }
-  if ((passingLaneThreat && roll < risk * .55) || roll < risk) {
-    return { label: "Broken up", className: "breakup", defenderId: passingLaneThreat?.id || nearest?.id || "", receiverId: catchTarget.id };
+  if ((passingLaneThreat && roll < risk * .55) || (contestThreat && roll < risk * .82) || roll < risk) {
+    return { label: "Broken up", className: "breakup", defenderId: passingLaneThreat?.id || contestThreat?.id || nearest?.id || "", receiverId: catchTarget.id };
   }
   return { label: "Complete", className: "complete", defenderId: "", receiverId: catchTarget.id };
 }
@@ -7026,6 +7042,59 @@ function interpolateDefensivePreSnap(start, route, elapsedSeconds, availableSeco
   };
 }
 
+function preSnapMotionPressures(offensePaths) {
+  return offensePaths
+    .filter(path => Array.isArray(path.motion) && path.motion.length)
+    .map(path => {
+      const end = path.snapStart || motionEnd(path.start, path.motion);
+      const dx = end.x - path.start.x;
+      const dy = end.y - path.start.y;
+      const distance = Math.hypot(dx, dy);
+      return {
+        id: path.id,
+        start: path.start,
+        end,
+        dx,
+        dy,
+        distance,
+        direction: distance ? { x: dx / distance, y: dy / distance } : { x: 0, y: 0 },
+        targetSide: end.x < fieldWidth / 2 ? "left" : "right"
+      };
+    })
+    .filter(pressure => pressure.distance > 12);
+}
+
+function defensiveMotionAdjustment(start, pressures, elapsedSeconds, availableSeconds, assignment = {}) {
+  if (!pressures.length || availableSeconds <= 0) return { x: 0, y: 0 };
+  const startSide = start.x < fieldWidth / 2 ? "left" : "right";
+  const best = pressures
+    .map(pressure => {
+      const endDistance = Math.hypot(start.x - pressure.end.x, start.y - pressure.end.y);
+      const sameSide = pressure.targetSide === startSide;
+      const nearMotion = endDistance < 210;
+      const sideScore = sameSide ? 1 : .42;
+      const distanceScore = Math.max(0, 1 - Math.min(1, endDistance / 270));
+      const zoneStyleWeight = assignment.isDeepSafety ? .32 : assignment.isFlatDefender || assignment.isCurlFlat ? .86 : .68;
+      return {
+        pressure,
+        score: (nearMotion ? .45 : .18) + (sideScore * .34) + (distanceScore * .38),
+        zoneStyleWeight
+      };
+    })
+    .sort((a, b) => b.score - a.score)[0];
+  if (!best || best.score < .45) return { x: 0, y: 0 };
+  const duration = Math.max(.5, Math.min(1.2, availableSeconds * .72));
+  const ratio = Math.max(0, Math.min(1, elapsedSeconds / duration));
+  const eased = ratio * ratio * (3 - (2 * ratio));
+  const sideDirection = best.pressure.end.x < start.x ? -1 : 1;
+  const travel = Math.min(26, 7 + best.pressure.distance * .16) * best.zoneStyleWeight * best.score;
+  const depthBump = Math.max(-6, Math.min(8, best.pressure.dy * .08)) * best.zoneStyleWeight;
+  return {
+    x: sideDirection * travel * eased,
+    y: depthBump * eased
+  };
+}
+
 function safeVelocity(distance, deltaSeconds) {
   const safeDelta = Math.max(.008, Math.min(.05, Number(deltaSeconds) || .016));
   return distance / safeDelta;
@@ -8394,6 +8463,11 @@ function moveZoneDefender(
         && technique !== "keepDepth"
         && technique !== "matchVertical"
         && (primary.zoneDistance < 1.08 || primary.vision?.clear || profile.flatRally > .56 || technique === "jumpFirst" || (influence.rpo && profile.jumpShort < profile.mistakeRate + .3));
+      const shouldContestZoneThreat = !primary.read.isVertical
+        && primary.zoneDistance <= (isFlatDefender || isCurlFlat ? 1.16 : 1.05)
+        && !shouldConceptMidpoint
+        && !splitZone
+        && technique !== "keepDepth";
       const shouldCarryVertical = !splitZone && primary.read.isVertical
         && (technique === "matchVertical" || !hasDeepHelp || profile.matchTendency > .62 || profile.overCarry < profile.mistakeRate)
         && (primary.y < readLandmark.y + radii.y * .28 || (primaryOutsideZone && primary.vision?.clear));
@@ -8433,6 +8507,14 @@ function moveZoneDefender(
         target = {
           x: low.x + ((high.x - low.x) * midpointPull),
           y: Math.min(readLandmark.y + radii.y * .16, low.y + ((high.y - low.y) * midpointPull))
+        };
+      } else if (shouldContestZoneThreat) {
+        mode = "rally";
+        const ballSideLeverage = primary.x < state.x ? 8 : -8;
+        const routeCushion = primary.read.isComingBack || primary.settledInZone ? 2 : 6;
+        target = {
+          x: primary.x + ballSideLeverage,
+          y: primary.y - routeCushion
         };
       } else if (shouldCarryVertical) {
         mode = "carry";
@@ -8807,6 +8889,7 @@ function previewMovement(scope) {
     0,
     ...offensePaths.map(path => pathDuration(path.start, path.motion, baseSpeed))
   );
+  const motionPressures = preSnapMotionPressures(offensePaths);
   const defensivePreSnapDuration = animateDefense && defensePaths.some(path => path.route.length)
     ? .85
     : 0;
@@ -8910,9 +8993,16 @@ function previewMovement(scope) {
         const postSnapElapsed = elapsed - maxMotionDuration;
         const defenderElapsed = postSnapElapsed - repDelay;
         const defenderDelta = deltaSeconds * repTempo;
-        const preSnapPoint = route.length && maxMotionDuration > 0
+        const defensivePathPoint = route.length && maxMotionDuration > 0
           ? interpolateDefensivePreSnap(start, route, elapsed, maxMotionDuration)
           : { ...start };
+        const motionAdjustment = maxMotionDuration > 0
+          ? defensiveMotionAdjustment(start, motionPressures, elapsed, maxMotionDuration, assignmentStyle || {})
+          : { x: 0, y: 0 };
+        const preSnapPoint = {
+          x: defensivePathPoint.x + motionAdjustment.x,
+          y: defensivePathPoint.y + motionAdjustment.y
+        };
         if (scope === "test" && testPlayDead()) {
           return;
         }
