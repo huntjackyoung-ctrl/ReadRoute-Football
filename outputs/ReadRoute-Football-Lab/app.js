@@ -1984,6 +1984,17 @@ function libraryPreviewNavigation() {
   };
 }
 
+function stepLibraryPreview(direction) {
+  const navigation = libraryPreviewNavigation();
+  if (!navigation) return false;
+  const target = direction === "previous"
+    ? navigation.previous
+    : navigation.next;
+  if (!target) return false;
+  selectLibraryPreview("play", target.id, libraryPreviewContext);
+  return true;
+}
+
 function renderPlaybookLibrary() {
   rememberLibraryFolderState();
   els.playbookLibrary.innerHTML = `
@@ -2100,13 +2111,7 @@ function renderPlaybookLibrary() {
 
   els.playbookLibrary.querySelectorAll("[data-library-preview-step]").forEach(button => {
     button.addEventListener("click", () => {
-      const navigation = libraryPreviewNavigation();
-      if (!navigation) return;
-      const target = button.dataset.libraryPreviewStep === "previous"
-        ? navigation.previous
-        : navigation.next;
-      if (!target) return;
-      selectLibraryPreview("play", target.id, libraryPreviewContext);
+      stepLibraryPreview(button.dataset.libraryPreviewStep);
     });
   });
 
@@ -7364,6 +7369,17 @@ function moveManDefender(state, receiverPosition, elapsed, deltaSeconds) {
   return { x: state.x, y: state.y };
 }
 
+function smoothPointToward(current, target, maxStep = 18) {
+  const dx = target.x - current.x;
+  const dy = target.y - current.y;
+  const distance = Math.hypot(dx, dy);
+  if (!distance || distance <= maxStep) return { ...target };
+  return {
+    x: current.x + (dx / distance) * maxStep,
+    y: current.y + (dy / distance) * maxStep
+  };
+}
+
 function clampToZone(point, zone) {
   const dx = point.x - zone.x;
   const dy = point.y - zone.y;
@@ -7796,6 +7812,142 @@ function receiverSettledInZone(receiver, zone, style) {
     && !receiver.read.isVertical;
 }
 
+function receiverFieldSide(receiver) {
+  if (receiver.x < fieldWidth * .44) return "left";
+  if (receiver.x > fieldWidth * .56) return "right";
+  return "middle";
+}
+
+function receiverMovingOutside(receiver) {
+  const side = receiverFieldSide(receiver);
+  if (side === "middle") return false;
+  return side === "left" ? receiver.vx < -12 : receiver.vx > 12;
+}
+
+function routeLevel(receiver) {
+  const depth = receiver.read?.routeDepth || 0;
+  if (receiver.read?.isFlat || depth < 42) return "low";
+  if (receiver.read?.isVertical || depth > 132) return "high";
+  return "mid";
+}
+
+function recognizeRouteDistribution(receivers) {
+  const concepts = [];
+  const tags = new Map(receivers.map(receiver => [receiver.id, {
+    score: 0,
+    labels: new Set(),
+    highLowPartnerId: "",
+    midpointIds: []
+  }]));
+  const bySide = ["left", "right"].map(side => ({
+    side,
+    receivers: receivers.filter(receiver =>
+      receiverFieldSide(receiver) === side
+    )
+  }));
+  const addTag = (receiver, label, score = 0, partnerId = "") => {
+    const tag = tags.get(receiver.id);
+    if (!tag) return;
+    tag.labels.add(label);
+    tag.score += score;
+    if (partnerId) tag.highLowPartnerId = partnerId;
+  };
+
+  bySide.forEach(({ side, receivers: sideReceivers }) => {
+    const low = sideReceivers.filter(receiver =>
+      routeLevel(receiver) === "low"
+      || (
+        Math.hypot(receiver.vx || 0, receiver.vy || 0) < 34
+        && (receiver.read?.routeDepth || 0) < 82
+        && !receiver.read?.isVertical
+      )
+    );
+    const mid = sideReceivers.filter(receiver => routeLevel(receiver) === "mid");
+    const high = sideReceivers.filter(receiver => routeLevel(receiver) === "high");
+    const outsideHigh = high.filter(receiver =>
+      receiver.read.isVertical || receiverMovingOutside(receiver)
+    );
+    const outsideLow = low.filter(receiver =>
+      receiver.read.isFlat || receiverMovingOutside(receiver)
+    );
+
+    if (outsideHigh.length && outsideLow.length) {
+      concepts.push({ type: "smash", side, highIds: outsideHigh.map(receiver => receiver.id), lowIds: outsideLow.map(receiver => receiver.id) });
+      outsideHigh.forEach(highReceiver => addTag(highReceiver, "smash-high", 26, outsideLow[0]?.id));
+      outsideLow.forEach(lowReceiver => addTag(lowReceiver, "smash-low", 18, outsideHigh[0]?.id));
+    }
+    if (low.length && mid.length && high.length) {
+      concepts.push({ type: "flood", side, lowIds: low.map(receiver => receiver.id), midIds: mid.map(receiver => receiver.id), highIds: high.map(receiver => receiver.id) });
+      low.forEach(receiver => addTag(receiver, "flood-low", 14, high[0]?.id));
+      mid.forEach(receiver => addTag(receiver, "flood-mid", 24, high[0]?.id));
+      high.forEach(receiver => addTag(receiver, "flood-high", 24, low[0]?.id));
+    }
+    if (high.length >= 2) {
+      concepts.push({ type: "vertical-stretch", side, highIds: high.map(receiver => receiver.id) });
+      high.forEach(receiver => {
+        addTag(receiver, "vertical-stretch", 30);
+        tags.get(receiver.id).midpointIds = high
+          .filter(other => other.id !== receiver.id)
+          .map(other => other.id);
+      });
+    }
+  });
+
+  const crossers = receivers.filter(receiver =>
+    receiver.read?.isCrosser
+    && receiver.read.routeDepth < 95
+  );
+  const leftCrossers = crossers.filter(receiver => receiver.vx < -14);
+  const rightCrossers = crossers.filter(receiver => receiver.vx > 14);
+  if (leftCrossers.length && rightCrossers.length) {
+    concepts.push({
+      type: "mesh",
+      ids: [...leftCrossers, ...rightCrossers].map(receiver => receiver.id)
+    });
+    [...leftCrossers, ...rightCrossers].forEach(receiver => addTag(receiver, "mesh-crosser", 26));
+  }
+
+  const verticals = receivers.filter(receiver =>
+    receiver.read?.isVertical
+    && !receiver.read?.isFlat
+    && !receiver.read?.isComingBack
+  );
+  if (verticals.length >= 3) {
+    concepts.push({ type: "four-verts", ids: verticals.map(receiver => receiver.id) });
+    verticals.forEach(receiver => {
+      addTag(receiver, "four-verts", 32);
+      tags.get(receiver.id).midpointIds = verticals
+        .filter(other => other.id !== receiver.id)
+        .map(other => other.id);
+    });
+  }
+
+  return {
+    concepts,
+    tags,
+    has(type) {
+      return concepts.some(concept => concept.type === type);
+    }
+  };
+}
+
+function applyRouteDistributionContext(receivers, distribution, style) {
+  receivers.forEach(receiver => {
+    const tag = distribution.tags.get(receiver.id);
+    if (!tag) return;
+    receiver.conceptLabels = [...tag.labels];
+    receiver.conceptPartnerId = tag.highLowPartnerId;
+    receiver.conceptMidpointIds = tag.midpointIds || [];
+    let conceptScore = tag.score;
+    if (style.isDeepSafety) {
+      conceptScore *= receiver.read.isVertical ? 1.25 : .35;
+    } else if (style.isFlatDefender || style.isCurlFlat) {
+      conceptScore *= receiver.read.isFlat || receiver.read.isCrosser ? 1.05 : .82;
+    }
+    receiver.threatScore += conceptScore;
+  });
+}
+
 function moveZoneDefender(
   state,
   zone,
@@ -7858,6 +8010,9 @@ function moveZoneDefender(
         ) + qbLookScore + settledScore
       };
     });
+  const routeDistribution = recognizeRouteDistribution(receiverCandidates);
+  applyRouteDistributionContext(receiverCandidates, routeDistribution, style);
+  state.routeConcepts = routeDistribution.concepts.map(concept => concept.type);
   state.lastSeenThreats = Object.fromEntries(
     receiverCandidates
       .filter(receiver => receiver.vision?.visible)
@@ -8221,6 +8376,19 @@ function moveZoneDefender(
       const singleZoneThreat = profile.testMode
         && inZoneThreatCount === 1
         && primary.zoneDistance <= zoneThreatLimit;
+      const conceptPartner = primary.conceptPartnerId
+        ? receiverCandidates.find(receiver => receiver.id === primary.conceptPartnerId)
+        : null;
+      const conceptLabels = primary.conceptLabels || [];
+      const highLowConcept = conceptPartner
+        && (conceptLabels.some(label => label.startsWith("smash") || label.startsWith("flood")))
+        && conceptPartner.zoneDistance <= (isFlatDefender || isCurlFlat ? 2.35 : 1.85);
+      const shouldConceptMidpoint = highLowConcept
+        && !profile.assignmentMistake
+        && technique !== "jumpFirst"
+        && technique !== "matchVertical"
+        && !primary.settledInZone
+        && (isFlatDefender || isCurlFlat || isHook);
       const shouldRallyFlat = (isFlatDefender || isCurlFlat)
         && primary.read.isFlat
         && technique !== "keepDepth"
@@ -8231,12 +8399,42 @@ function moveZoneDefender(
         && (primary.y < readLandmark.y + radii.y * .28 || (primaryOutsideZone && primary.vision?.clear));
       const shouldWallCrosser = (isHook || technique === "wallCrosser" || technique === "robInside")
         && primary.read.isCrosser;
+      const meshThreats = inZoneThreats.filter(threat =>
+        threat.conceptLabels?.includes("mesh-crosser")
+      );
+      const shouldMeshMidpoint = meshThreats.length > 1
+        && isHook
+        && !profile.assignmentMistake
+        && technique !== "jumpFirst"
+        && profile.overCarry >= profile.mistakeRate + .08;
       const passOffVertical = hasDeepHelp
         && technique !== "matchVertical"
         && primary.read.routeDepth > 120
         && primary.y < readLandmark.y - radii.y * .45;
       const overCarryMistake = shouldCarryVertical && hasDeepHelp && profile.overCarry < profile.mistakeRate + .16;
-      if (shouldCarryVertical) {
+      if (shouldMeshMidpoint) {
+        mode = "midpoint";
+        const sortedMesh = [...meshThreats].sort((a, b) => a.x - b.x);
+        const left = sortedMesh[0];
+        const right = sortedMesh[sortedMesh.length - 1];
+        const nearestDepth = sortedMesh.reduce((best, threat) =>
+          Math.abs(threat.y - state.y) < Math.abs(best.y - state.y) ? threat : best, sortedMesh[0]);
+        target = {
+          x: (left.x + right.x) / 2,
+          y: Math.min(readLandmark.y + radii.y * .22, nearestDepth.y - 4)
+        };
+      } else if (shouldConceptMidpoint) {
+        mode = "midpoint";
+        const high = primary.read.routeDepth >= (conceptPartner.read?.routeDepth || 0)
+          ? primary
+          : conceptPartner;
+        const low = high.id === primary.id ? conceptPartner : primary;
+        const midpointPull = isFlatDefender ? .42 : isCurlFlat ? .55 : .62;
+        target = {
+          x: low.x + ((high.x - low.x) * midpointPull),
+          y: Math.min(readLandmark.y + radii.y * .16, low.y + ((high.y - low.y) * midpointPull))
+        };
+      } else if (shouldCarryVertical) {
         mode = "carry";
         target = {
           x: zone.x + ((primary.x - zone.x) * (overCarryMistake || technique === "matchVertical" ? .78 : hasDeepHelp ? .42 : .62)),
@@ -8537,6 +8735,7 @@ function previewMovement(scope) {
           id,
           start,
           pathSnapStart,
+          pathLiveStart: null,
           route: animatedRoute,
           routeDuration,
           repDelay,
@@ -8544,6 +8743,7 @@ function previewMovement(scope) {
           passRushDelay: 4 + (Math.random() * 2),
           manTarget,
           zoneAssignment,
+          assignmentStyle,
           manState: {
             x: start.x,
             y: start.y,
@@ -8579,6 +8779,7 @@ function previewMovement(scope) {
             y: zoneStart.y,
             vx: 0,
             vy: 0,
+            postSnapStarted: false,
             start: zoneStart,
             technique,
             body: initializeBodyState(assignmentStyle?.isDeepSafety ? "backpedal" : "shuffle"),
@@ -8702,6 +8903,7 @@ function previewMovement(scope) {
         passRushDelay,
         manTarget,
         zoneAssignment,
+        assignmentStyle,
         manState,
         zoneState
       }) => {
@@ -8777,10 +8979,12 @@ function previewMovement(scope) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = { id: manTarget, ...(animationState.offense[manTarget] || targetStart) };
           if (postSnapElapsed < 0) {
-            animationState.defense[id] = {
+            const current = animationState.defense[id] || start;
+            const motionTarget = {
               x: preSnapPoint.x + (targetPosition.x - targetStart.x),
               y: preSnapPoint.y
             };
+            animationState.defense[id] = smoothPointToward(current, motionTarget, 14 + (defenderDelta * 120));
             animationPlayback.defenderEyes[id] = {
               facing: vectorToward(animationState.defense[id], targetPosition),
               mode: "motion-man",
@@ -8789,10 +8993,12 @@ function previewMovement(scope) {
             return;
           }
           if (defenderElapsed < 0) {
-            animationState.defense[id] = {
+            const current = animationState.defense[id] || start;
+            const motionTarget = {
               x: preSnapPoint.x + (targetPosition.x - targetStart.x),
               y: preSnapPoint.y
             };
+            animationState.defense[id] = smoothPointToward(current, motionTarget, 14 + (defenderDelta * 120));
             animationPlayback.defenderEyes[id] = {
               facing: vectorToward(animationState.defense[id], targetPosition),
               mode: "motion-man",
@@ -8801,13 +9007,17 @@ function previewMovement(scope) {
             return;
           }
           if (!manState.postSnapStarted) {
-            manState.x = preSnapPoint.x + (targetPosition.x - targetStart.x);
-            manState.y = preSnapPoint.y;
+            const liveStart = animationState.defense[id] || {
+              x: preSnapPoint.x + (targetPosition.x - targetStart.x),
+              y: preSnapPoint.y
+            };
+            manState.x = liveStart.x;
+            manState.y = liveStart.y;
             manState.vx = 0;
             manState.vy = 0;
             manState.start = { x: manState.x, y: manState.y };
             manState.receiverStart = { ...targetPosition };
-            manState.initialCushion = Math.max(18, targetPosition.y - manState.y);
+            manState.initialCushion = Math.max(18, Math.min(72, targetPosition.y - manState.y));
             manState.horizontalLeverage = manState.x - targetPosition.x;
             manState.phase = "mirror";
             manState.deepThreatened = false;
@@ -8842,8 +9052,10 @@ function previewMovement(scope) {
             return;
           }
           if (route.length && defenderElapsed < routeDuration) {
+            zoneState.pathLiveStart ||= animationState.defense[id] || pathSnapStart;
+            const livePathStart = zoneState.pathLiveStart;
             animationState.defense[id] = interpolateTimedPath(
-              pathSnapStart,
+              livePathStart,
               route,
               defenderElapsed,
               baseSpeed * repTempo
@@ -8851,7 +9063,7 @@ function previewMovement(scope) {
             animationPlayback.defenderEyes[id] = {
               facing: routeMovementEyeVector(
                 animationState.defense[id],
-                pathSnapStart,
+                livePathStart,
                 route,
                 defenderElapsed,
                 baseSpeed * repTempo
@@ -8861,6 +9073,7 @@ function previewMovement(scope) {
             };
             return;
           }
+          zoneState.pathLiveStart = null;
           const receivers = receiverSnapshots.map(receiver => ({
             ...receiver,
             zoneDistancePrevious: zoneDistance(
@@ -8875,6 +9088,26 @@ function previewMovement(scope) {
             && Math.abs(other.zoneAssignment.x - zoneAssignment.x)
               <= (zoneRadii(other.zoneAssignment).x + zoneRadii(zoneAssignment).x)
           );
+          if (!zoneState.postSnapStarted) {
+            const liveStart = animationState.defense[id] || zoneState.start || start;
+            zoneState.x = liveStart.x;
+            zoneState.y = liveStart.y;
+            zoneState.vx = 0;
+            zoneState.vy = 0;
+            zoneState.start = { ...liveStart };
+            zoneState.body = initializeBodyState(assignmentStyle?.isDeepSafety ? "backpedal" : "shuffle");
+            zoneState.profile = createDefenderAiProfile(
+              liveStart,
+              zoneAssignment,
+              manTarget,
+              activeDefenseRealism,
+              `${defensiveRepId}-${id}-zone-live`
+            );
+            zoneState.primaryThreatId = null;
+            zoneState.deepThreatId = null;
+            zoneState.commitUntil = 0;
+            zoneState.postSnapStarted = true;
+          }
           animationState.defense[id] = moveZoneDefender(
             zoneState,
             zoneAssignment,
@@ -8895,8 +9128,9 @@ function previewMovement(scope) {
             animationState.defense[id] = { ...preSnapPoint };
             return;
           }
+          zoneState.pathLiveStart ||= animationState.defense[id] || pathSnapStart;
           animationState.defense[id] = interpolateTimedPath(
-            pathSnapStart,
+            zoneState.pathLiveStart,
             route,
             defenderElapsed,
             baseSpeed * repTempo
@@ -9095,9 +9329,16 @@ function snapTestBall() {
 document.querySelector("#runTestButton").addEventListener("click", snapTestBall);
 
 document.addEventListener("keydown", event => {
-  if (event.code !== "Space" || !["run", "test"].includes(appTab)) return;
   const target = event.target;
   if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
+  if (appTab === "playbook" && (event.code === "ArrowLeft" || event.code === "ArrowRight")) {
+    const moved = stepLibraryPreview(event.code === "ArrowLeft" ? "previous" : "next");
+    if (!moved) return;
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
+  if (event.code !== "Space" || !["run", "test"].includes(appTab)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
   if (appTab === "test") {
