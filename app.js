@@ -3819,7 +3819,7 @@ function renderTestControls() {
     ? "Choose your plays and defenses, then start the test."
     : testAnswerRevealed
       ? `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-      : `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name}. Press Space to snap.`;
+      : `Play ${testSessionIndex + 1} of ${testSessionPlayIds.length}: ${currentFormation().name} / ${currentPlay().name}. Space once sets, Space again snaps.`;
 }
 
 function loadNextTestPlay() {
@@ -6196,7 +6196,7 @@ function render() {
         ? "Choose the plays and defenses for this session, then start the test."
         : testAnswerRevealed
           ? `${currentFormation().name} / ${currentPlay().name} vs. ${currentDefense().name}`
-          : `${currentFormation().name} / ${currentPlay().name}. Space snaps it, move your mouse for QB eyes, click a receiver to throw.`)
+          : `${currentFormation().name} / ${currentPlay().name}. Space once sets, Space again snaps. After the snap, move your mouse for QB eyes and click to throw.`)
     : appTab === "run"
     ? (activeRunRouteOptions().length
         ? `Active options: ${activeRunRouteOptions().map(item =>
@@ -8568,6 +8568,10 @@ function previewMovement(scope) {
   animationPlayback = {
     scope,
     paused: false,
+    snapReleased: !(scope === "run" || scope === "test"),
+    snapHold: false,
+    snapHoldStartedAt: 0,
+    snapPointSeconds: maxMotionDuration,
     pauseStartedAt: 0,
     pausedDuration: 0,
     startedAt,
@@ -8584,10 +8588,15 @@ function previewMovement(scope) {
   updatePlaybackUi();
 
   function animate(now) {
-    if (!animationPlayback || animationPlayback.paused) return;
-    const elapsed = (
+    if (!animationPlayback || animationPlayback.paused || animationPlayback.snapHold) return;
+    const rawElapsed = (
       (now - animationPlayback.startedAt - animationPlayback.pausedDuration) / 1000
     ) * playbackScale;
+    const shouldHoldForSnap = !animationPlayback.snapReleased
+      && rawElapsed >= animationPlayback.snapPointSeconds;
+    const elapsed = shouldHoldForSnap
+      ? animationPlayback.snapPointSeconds
+      : rawElapsed;
     const deltaSeconds = Math.min(
       .05,
       ((now - animationPlayback.lastFrameAt) / 1000) * playbackScale
@@ -8844,6 +8853,14 @@ function previewMovement(scope) {
     });
     renderRoutesAndPlayers();
     renderDefense();
+    if (shouldHoldForSnap) {
+      animationPlayback.snapHold = true;
+      animationPlayback.snapHoldStartedAt = now;
+      animationPlayback.lastFrameAt = now;
+      animationFrame = null;
+      updatePlaybackUi();
+      return;
+    }
     const keepAnimatingTestCatch = scope === "test" && completedTestCatchActive();
     const keepAnimatingTestThrow = scope === "test" && testThrowState && !testThrowState.resolved;
     if (!testPlayDead() && (elapsed < Math.max(totalDuration, testSackDeadline) || keepAnimatingTestCatch || keepAnimatingTestThrow)) {
@@ -8861,15 +8878,34 @@ function previewMovement(scope) {
 
 function updatePlaybackUi() {
   const paused = Boolean(animationPlayback?.paused);
+  const snapHold = Boolean(animationPlayback?.snapHold);
   els.fieldCard?.classList.toggle("playback-paused", paused);
   const runButton = document.querySelector("#runPlayButton");
-  if (runButton) runButton.textContent = paused ? "Resume" : "Play";
+  if (runButton) runButton.textContent = paused
+    ? "Resume"
+    : snapHold ? "Snap" : animationPlayback?.scope === "run" ? "Setting..." : "Set";
   const testButton = document.querySelector("#runTestButton");
-  if (testButton) testButton.textContent = paused ? "Resume Test" : "Run Test";
+  if (testButton) testButton.textContent = paused
+    ? "Resume Test"
+    : snapHold ? "Snap" : animationPlayback?.scope === "test" ? "Setting..." : "Set";
+}
+
+function releasePlaybackSnap() {
+  if (!animationPlayback?.snapHold || !animationPlayback.animate) return false;
+  const now = performance.now();
+  animationPlayback.pausedDuration += now - animationPlayback.snapHoldStartedAt;
+  animationPlayback.snapReleased = true;
+  animationPlayback.snapHold = false;
+  animationPlayback.snapHoldStartedAt = 0;
+  animationPlayback.lastFrameAt = now;
+  animationFrame = requestAnimationFrame(animationPlayback.animate);
+  updatePlaybackUi();
+  return true;
 }
 
 function toggleRunPlayback() {
   if (!isRunLikeMode() || !animationPlayback) return false;
+  if (animationPlayback.snapHold) return releasePlaybackSnap();
   if (animationPlayback.paused) {
     const resumedAt = performance.now();
     animationPlayback.pausedDuration += resumedAt - animationPlayback.pauseStartedAt;
@@ -8890,10 +8926,12 @@ els.field.addEventListener("click", event => {
   if (!animationPlayback || appTab !== "run") return;
   event.preventDefault();
   event.stopImmediatePropagation();
+  if (animationPlayback.snapHold) return;
   toggleRunPlayback();
 }, true);
 
 document.querySelector("#runPlayButton").addEventListener("click", () => {
+  if (releasePlaybackSnap()) return;
   if (animationPlayback?.paused) {
     toggleRunPlayback();
     return;
@@ -8980,6 +9018,11 @@ document.querySelector("#newTestRoundButton").addEventListener("click", loadNext
 
 function snapTestBall() {
   if (!testRoundReady) return;
+  if (releasePlaybackSnap()) return;
+  if (animationPlayback?.paused) {
+    toggleRunPlayback();
+    return;
+  }
   stopAnimationPlayback();
   resetTestInteraction();
   testAnswerRevealed = false;
@@ -8990,12 +9033,22 @@ function snapTestBall() {
 document.querySelector("#runTestButton").addEventListener("click", snapTestBall);
 
 document.addEventListener("keydown", event => {
-  if (event.code !== "Space" || appTab !== "test" || !testRoundReady) return;
+  if (event.code !== "Space" || !["run", "test"].includes(appTab)) return;
   const target = event.target;
   if (target && ["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName)) return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  snapTestBall();
+  if (appTab === "test") {
+    if (!testRoundReady) return;
+    snapTestBall();
+  } else {
+    if (releasePlaybackSnap()) return;
+    if (animationPlayback?.paused) {
+      toggleRunPlayback();
+      return;
+    }
+    previewMovement("run");
+  }
 }, true);
 
 document.querySelector("#resetTestButton").addEventListener("click", () => {
