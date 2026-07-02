@@ -8913,7 +8913,7 @@ function previewMovement(scope) {
   animationPlayback = {
     scope,
     paused: false,
-    snapReleased: !(scope === "run" || scope === "test"),
+    snapReleased: scope !== "test",
     snapHold: false,
     snapHoldStartedAt: 0,
     snapPointSeconds: maxMotionDuration,
@@ -9267,9 +9267,7 @@ function updatePlaybackUi() {
   const snapHold = Boolean(animationPlayback?.snapHold);
   els.fieldCard?.classList.toggle("playback-paused", paused);
   const runButton = document.querySelector("#runPlayButton");
-  if (runButton) runButton.textContent = paused
-    ? "Resume"
-    : snapHold ? "Snap" : animationPlayback?.scope === "run" ? "Setting..." : "Set";
+  if (runButton) runButton.textContent = paused ? "Resume" : "Play";
   const testButton = document.querySelector("#runTestButton");
   if (testButton) testButton.textContent = paused
     ? "Resume Test"
@@ -9291,7 +9289,7 @@ function releasePlaybackSnap() {
 
 function toggleRunPlayback() {
   if (!isRunLikeMode() || !animationPlayback) return false;
-  if (animationPlayback.snapHold) return releasePlaybackSnap();
+  if (animationPlayback.snapHold) return appTab === "test" ? releasePlaybackSnap() : false;
   if (animationPlayback.paused) {
     const resumedAt = performance.now();
     animationPlayback.pausedDuration += resumedAt - animationPlayback.pauseStartedAt;
@@ -9312,12 +9310,10 @@ els.field.addEventListener("click", event => {
   if (!animationPlayback || appTab !== "run") return;
   event.preventDefault();
   event.stopImmediatePropagation();
-  if (animationPlayback.snapHold) return;
   toggleRunPlayback();
 }, true);
 
 document.querySelector("#runPlayButton").addEventListener("click", () => {
-  if (releasePlaybackSnap()) return;
   if (animationPlayback?.paused) {
     toggleRunPlayback();
     return;
@@ -9435,7 +9431,6 @@ document.addEventListener("keydown", event => {
     if (!testRoundReady) return;
     snapTestBall();
   } else {
-    if (releasePlaybackSnap()) return;
     if (animationPlayback?.paused) {
       toggleRunPlayback();
       return;
