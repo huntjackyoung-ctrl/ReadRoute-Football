@@ -3559,7 +3559,7 @@ function rallyTestDefenseToBall(deltaSeconds) {
   if (!completedTestCatchActive()) return;
   animationState ||= { offense: {}, defense: {} };
   const ballPoint = testThrowState.catchRun.current;
-  const defenders = Object.entries(animationState.defense || currentDefenseEditorPositions());
+      const defenders = Object.entries(animationState.defense || currentDefenseEditorPositions());
   defenders.forEach(([id, current]) => {
     const rallied = rallyDefenderToBall(id, current, ballPoint, deltaSeconds, 1);
     animationState.defense[id] = rallied;
@@ -6995,6 +6995,32 @@ function interpolateTimedPath(start, points, elapsedSeconds, baseSpeed = 115) {
   return points.length ? { ...points[points.length - 1] } : { ...start };
 }
 
+function defensivePreSnapPathTarget(start, route) {
+  const firstPoint = Array.isArray(route) ? route[0] : null;
+  if (!firstPoint) return null;
+  const dx = firstPoint.x - start.x;
+  const dy = firstPoint.y - start.y;
+  const distance = Math.hypot(dx, dy);
+  if (distance < 6) return null;
+  const creepDistance = Math.min(22, Math.max(8, distance * .18));
+  return {
+    x: start.x + (dx / distance) * creepDistance,
+    y: start.y + (dy / distance) * creepDistance
+  };
+}
+
+function interpolateDefensivePreSnap(start, route, elapsedSeconds, availableSeconds) {
+  const target = defensivePreSnapPathTarget(start, route);
+  if (!target || availableSeconds <= 0) return { ...start };
+  const duration = Math.max(.45, Math.min(1.35, availableSeconds * .82));
+  const ratio = Math.max(0, Math.min(1, elapsedSeconds / duration));
+  const eased = ratio * ratio * (3 - (2 * ratio));
+  return {
+    x: start.x + ((target.x - start.x) * eased),
+    y: start.y + ((target.y - start.y) * eased)
+  };
+}
+
 function safeVelocity(distance, deltaSeconds) {
   const safeDelta = Math.max(.008, Math.min(.05, Number(deltaSeconds) || .016));
   return distance / safeDelta;
@@ -8441,13 +8467,15 @@ function previewMovement(scope) {
           x: point.x + ((Math.random() - .5) * Math.min(10, 3 + index * 1.5)),
           y: point.y + ((Math.random() - .5) * Math.min(8, 2 + index * 1.2))
         }));
-        const routeDuration = pathDuration(start, animatedRoute, baseSpeed * repTempo);
+        const pathSnapStart = defensivePreSnapPathTarget(start, animatedRoute) || start;
+        const routeDuration = pathDuration(pathSnapStart, animatedRoute, baseSpeed * repTempo);
         const zoneStart = animatedRoute.length
           ? { ...animatedRoute[animatedRoute.length - 1] }
           : { ...start };
         return {
           id,
           start,
+          pathSnapStart,
           route: animatedRoute,
           routeDuration,
           repDelay,
@@ -8513,10 +8541,14 @@ function previewMovement(scope) {
   defensePaths.forEach(({ id, start }) => {
     animationState.defense[id] = { ...start };
   });
-  const maxMotionDuration = Math.max(
+  const maxOffenseMotionDuration = Math.max(
     0,
     ...offensePaths.map(path => pathDuration(path.start, path.motion, baseSpeed))
   );
+  const defensivePreSnapDuration = animateDefense && defensePaths.some(path => path.route.length)
+    ? .85
+    : 0;
+  const maxMotionDuration = Math.max(maxOffenseMotionDuration, defensivePreSnapDuration);
   const maxPostSnapDuration = Math.max(
     0,
     ...offensePaths.map(path => pathDuration(path.snapStart, path.route, baseSpeed)),
@@ -8591,6 +8623,7 @@ function previewMovement(scope) {
       defensePaths.forEach(({
         id,
         start,
+        pathSnapStart,
         route,
         routeDuration,
         repDelay,
@@ -8604,6 +8637,9 @@ function previewMovement(scope) {
         const postSnapElapsed = elapsed - maxMotionDuration;
         const defenderElapsed = postSnapElapsed - repDelay;
         const defenderDelta = deltaSeconds * repTempo;
+        const preSnapPoint = route.length && maxMotionDuration > 0
+          ? interpolateDefensivePreSnap(start, route, elapsed, maxMotionDuration)
+          : { ...start };
         if (scope === "test" && testPlayDead()) {
           return;
         }
@@ -8655,13 +8691,24 @@ function previewMovement(scope) {
           if (sackNow) resolveTestQbSack(id);
           return;
         }
+        if (!manTarget && postSnapElapsed < 0) {
+          animationState.defense[id] = { ...preSnapPoint };
+          animationPlayback.defenderEyes[id] = {
+            facing: route.length
+              ? vectorToward(preSnapPoint, route[0])
+              : ballFacingVector(preSnapPoint),
+            mode: route.length ? "pre-snap-movement" : "landmark",
+            targetId: ""
+          };
+          return;
+        }
         if (manTarget) {
           const targetStart = editorOffensePositions()[manTarget];
           const targetPosition = { id: manTarget, ...(animationState.offense[manTarget] || targetStart) };
           if (postSnapElapsed < 0) {
             animationState.defense[id] = {
-              x: start.x + (targetPosition.x - targetStart.x),
-              y: start.y
+              x: preSnapPoint.x + (targetPosition.x - targetStart.x),
+              y: preSnapPoint.y
             };
             animationPlayback.defenderEyes[id] = {
               facing: vectorToward(animationState.defense[id], targetPosition),
@@ -8672,8 +8719,8 @@ function previewMovement(scope) {
           }
           if (defenderElapsed < 0) {
             animationState.defense[id] = {
-              x: start.x + (targetPosition.x - targetStart.x),
-              y: start.y
+              x: preSnapPoint.x + (targetPosition.x - targetStart.x),
+              y: preSnapPoint.y
             };
             animationPlayback.defenderEyes[id] = {
               facing: vectorToward(animationState.defense[id], targetPosition),
@@ -8683,8 +8730,8 @@ function previewMovement(scope) {
             return;
           }
           if (!manState.postSnapStarted) {
-            manState.x = start.x + (targetPosition.x - targetStart.x);
-            manState.y = start.y;
+            manState.x = preSnapPoint.x + (targetPosition.x - targetStart.x);
+            manState.y = preSnapPoint.y;
             manState.vx = 0;
             manState.vy = 0;
             manState.start = { x: manState.x, y: manState.y };
@@ -8713,17 +8760,19 @@ function previewMovement(scope) {
           };
         } else if (zoneAssignment && postSnapElapsed >= 0) {
           if (defenderElapsed < 0) {
-            animationState.defense[id] = { ...start };
+            animationState.defense[id] = { ...preSnapPoint };
             animationPlayback.defenderEyes[id] = {
-              facing: ballFacingVector(start),
-              mode: "landmark",
+              facing: route.length
+                ? vectorToward(preSnapPoint, route[0])
+                : ballFacingVector(preSnapPoint),
+              mode: route.length ? "pre-snap-movement" : "landmark",
               targetId: ""
             };
             return;
           }
           if (route.length && defenderElapsed < routeDuration) {
             animationState.defense[id] = interpolateTimedPath(
-              start,
+              pathSnapStart,
               route,
               defenderElapsed,
               baseSpeed * repTempo
@@ -8731,7 +8780,7 @@ function previewMovement(scope) {
             animationPlayback.defenderEyes[id] = {
               facing: routeMovementEyeVector(
                 animationState.defense[id],
-                start,
+                pathSnapStart,
                 route,
                 defenderElapsed,
                 baseSpeed * repTempo
@@ -8772,11 +8821,11 @@ function previewMovement(scope) {
           };
         } else if (postSnapElapsed >= 0) {
           if (defenderElapsed < 0) {
-            animationState.defense[id] = { ...start };
+            animationState.defense[id] = { ...preSnapPoint };
             return;
           }
           animationState.defense[id] = interpolateTimedPath(
-            start,
+            pathSnapStart,
             route,
             defenderElapsed,
             baseSpeed * repTempo
