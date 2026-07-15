@@ -1834,17 +1834,55 @@ function folderPickerPanelMarkup() {
 function printFolderOptionMarkup(folder, depth = 0) {
   const children = libraryFolderChildren(folder.id);
   const printCount = collectFolderPrintPlayIds(folder.id).size;
+  const directItems = sortedFolderItems(folder);
+  const directPlayRows = directItems.flatMap(item => {
+    if (item.type === "play") {
+      const play = plays.find(candidate => candidate.id === item.id);
+      if (!play) return [];
+      return [{
+        play,
+        label: playFormationName(play)
+      }];
+    }
+    if (item.type === "formation") {
+      const formation = formations.find(candidate => candidate.id === item.id);
+      if (!formation) return [];
+      return plays
+        .filter(play => play.formationId === formation.id)
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map(play => ({
+          play,
+          label: formation.name
+        }));
+    }
+    return [];
+  });
   return `
-    <div class="print-folder-option" style="--print-folder-depth:${depth}">
-      <label class="print-playbook-check">
-        <input type="checkbox" data-print-folder="${folder.id}" ${printCount ? "" : "disabled"}>
-        <span>
-          <strong>${escapeHtml(folder.name)}</strong>
-          <small>${printCount} ${printCount === 1 ? "play" : "plays"}</small>
-        </span>
-      </label>
-      ${children.map(child => printFolderOptionMarkup(child, depth + 1)).join("")}
-    </div>
+    <details class="print-folder-option print-playbook-group" style="--print-folder-depth:${depth}">
+      <summary>
+        <div class="print-playbook-check">
+          <input type="checkbox" data-print-folder="${folder.id}" ${printCount ? "" : "disabled"}>
+          <span>
+            <strong>${escapeHtml(folder.name)}</strong>
+            <small>${printCount} ${printCount === 1 ? "play" : "plays"}</small>
+          </span>
+        </div>
+      </summary>
+      <div class="print-playbook-options">
+        ${directPlayRows.length
+          ? directPlayRows.map(({ play, label }) => `
+            <label class="print-playbook-check compact">
+              <input type="checkbox" data-print-play="${play.id}">
+              <span>
+                <strong>${escapeHtml(label)}</strong>
+                <em>${escapeHtml(play.name)}</em>
+              </span>
+            </label>
+          `).join("")
+          : `<p class="library-empty">No direct plays in this folder.</p>`}
+        ${children.map(child => printFolderOptionMarkup(child, depth + 1)).join("")}
+      </div>
+    </details>
   `;
 }
 
@@ -1863,13 +1901,13 @@ function printPlaybookPanelMarkup() {
       return `
         <details class="print-playbook-group">
           <summary>
-            <label class="print-playbook-check">
+            <div class="print-playbook-check">
               <input type="checkbox" data-print-formation="${formation.id}" ${formationPlays.length ? "" : "disabled"}>
               <span>
                 <strong>${escapeHtml(formation.name)}</strong>
                 <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
               </span>
-            </label>
+            </div>
           </summary>
           <div class="print-playbook-options">
             ${formationPlays.length
@@ -1918,6 +1956,10 @@ function printPlaybookPanelMarkup() {
           <p class="eyebrow">Print out playbook</p>
           <h3>Choose Plays For PDF</h3>
           <p>Select folders, whole formations, or individual plays. The printout is one play per landscape page.</p>
+          <label class="print-playbook-toggle">
+            <input id="printHideNotesInput" type="checkbox">
+            <span>Hide notes on printout</span>
+          </label>
         </div>
         <div class="print-playbook-actions">
           <button class="library-action-button" data-close-print-playbook>Cancel</button>
@@ -1961,31 +2003,31 @@ function collectFolderPrintPlayIds(folderId, collected = new Set()) {
 
 function selectedPrintPlayIds() {
   const selected = new Set();
-  els.playbookLibrary.querySelectorAll("[data-print-folder]:checked").forEach(input => {
-    collectFolderPrintPlayIds(input.dataset.printFolder).forEach(id => selected.add(id));
-  });
-  els.playbookLibrary.querySelectorAll("[data-print-formation]:checked").forEach(input => {
-    plays
-      .filter(play => play.formationId === input.dataset.printFormation)
-      .forEach(play => selected.add(play.id));
-  });
-  els.playbookLibrary.querySelectorAll("[data-print-play]:checked").forEach(input => {
-    selected.add(input.dataset.printPlay);
-  });
+  els.playbookLibrary
+    .querySelectorAll("[data-print-folder], [data-print-formation], [data-print-play]")
+    .forEach(input => {
+      if (!input.checked) return;
+      if (input.dataset.printFolder) {
+        collectFolderPrintPlayIds(input.dataset.printFolder).forEach(id => selected.add(id));
+      } else if (input.dataset.printFormation) {
+        plays
+          .filter(play => play.formationId === input.dataset.printFormation)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .forEach(play => selected.add(play.id));
+      } else if (input.dataset.printPlay) {
+        selected.add(input.dataset.printPlay);
+      }
+    });
   return [...selected]
     .map(id => plays.find(play => play.id === id))
-    .filter(Boolean)
-    .sort((a, b) => {
-      const formationCompare = playFormationName(a).localeCompare(playFormationName(b));
-      return formationCompare || a.name.localeCompare(b.name);
-    });
+    .filter(Boolean);
 }
 
 function printMarkerId(play, name) {
   return `${name}-${String(play.id).replace(/[^a-z0-9_-]/gi, "")}`;
 }
 
-function printablePlayDiagramMarkup(play) {
+function printablePlayDiagramMarkup(play, options = {}) {
   const formation = formations.find(savedFormation => savedFormation.id === play.formationId) || formations[0];
   const offensePositions = play.offensePositions || formation.offensePositions;
   const offenseLabels = play.labels || formation.labels;
@@ -2055,7 +2097,7 @@ function printablePlayDiagramMarkup(play) {
       return `<g transform="translate(${point.x} ${point.y})"><circle r="19" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="10" font-weight="900">QB</text></g>`;
     })()
   ].join("");
-  const notes = [...(formation.notes || []), ...(play.notes || [])];
+  const notes = options.hideNotes ? [] : [...(formation.notes || []), ...(play.notes || [])];
   const notesMarkup = notes.map(note => {
     const dimensions = noteDimensions(note.text);
     const x = Math.max(6, Math.min(note.x, fieldWidth - 6 - dimensions.width));
@@ -2079,7 +2121,12 @@ function printablePlayDiagramMarkup(play) {
   ).join("");
 
   return `
-    <article class="print-page">
+    <article class="print-page" draggable="true">
+      <div class="print-page-controls">
+        <span class="print-page-handle" title="Drag to reorder">Drag</span>
+        <button type="button" data-move-page="up">Up</button>
+        <button type="button" data-move-page="down">Down</button>
+      </div>
       <header>
         <div>
           <p>${escapeHtml(formation.name)}</p>
@@ -2106,7 +2153,7 @@ function printablePlayDiagramMarkup(play) {
   `;
 }
 
-function printablePlaybookDocumentMarkup(selectedPlays) {
+function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
   const title = `ReadRoute Playbook - ${new Date().toLocaleDateString()}`;
   return `<!doctype html>
     <html>
@@ -2135,6 +2182,11 @@ function printablePlaybookDocumentMarkup(selectedPlays) {
             box-shadow: 0 8px 24px rgba(0,0,0,.18);
           }
           .print-toolbar strong { font-size: 14px; }
+          .print-toolbar span {
+            color: #a8b5af;
+            font-size: 11px;
+            font-weight: 750;
+          }
           .print-toolbar button {
             padding: 9px 14px;
             border: 0;
@@ -2157,6 +2209,42 @@ function printablePlaybookDocumentMarkup(selectedPlays) {
             border-radius: 12px;
             background: #fffdf7;
             box-shadow: 0 16px 45px rgba(11,30,22,.12);
+          }
+          .print-page.dragging {
+            opacity: .45;
+          }
+          .print-page.drop-before {
+            box-shadow: 0 -10px 0 #c9f45c, 0 16px 45px rgba(11,30,22,.12);
+          }
+          .print-page.drop-after {
+            box-shadow: 0 10px 0 #c9f45c, 0 16px 45px rgba(11,30,22,.12);
+          }
+          .print-page-controls {
+            margin: -2px 0 8px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            color: #66736d;
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          .print-page-handle {
+            padding: 5px 9px;
+            border-radius: 999px;
+            color: #06120d;
+            background: #c9f45c;
+            cursor: grab;
+          }
+          .print-page-controls button {
+            padding: 5px 8px;
+            border: 1px solid #d9d7cd;
+            border-radius: 999px;
+            color: #174c35;
+            background: #fff;
+            font-size: 9px;
+            font-weight: 900;
+            cursor: pointer;
           }
           .print-page:last-child {
             break-after: auto;
@@ -2225,6 +2313,7 @@ function printablePlaybookDocumentMarkup(selectedPlays) {
           @media print {
             body { background: #fff; }
             .print-toolbar { display: none; }
+            .print-page-controls { display: none; }
             .print-page {
               width: auto;
               min-height: auto;
@@ -2239,10 +2328,67 @@ function printablePlaybookDocumentMarkup(selectedPlays) {
       </head>
       <body>
         <div class="print-toolbar">
-          <strong>${selectedPlays.length} ${selectedPlays.length === 1 ? "play" : "plays"} ready</strong>
+          <div>
+            <strong>${selectedPlays.length} ${selectedPlays.length === 1 ? "play" : "plays"} ready</strong>
+            <span>Drag pages or use Up/Down to set the order before printing.</span>
+          </div>
           <button onclick="window.print()">Print / Save PDF</button>
         </div>
-        ${selectedPlays.map(printablePlayDiagramMarkup).join("")}
+        ${selectedPlays.map(play => printablePlayDiagramMarkup(play, options)).join("")}
+        <script>
+          (() => {
+            let draggedPage = null;
+            const pages = () => [...document.querySelectorAll(".print-page")];
+            function clearDropClasses() {
+              pages().forEach(page => page.classList.remove("drop-before", "drop-after"));
+            }
+            function movePage(page, direction) {
+              if (!page) return;
+              if (direction === "up" && page.previousElementSibling?.classList.contains("print-page")) {
+                page.parentNode.insertBefore(page, page.previousElementSibling);
+              }
+              if (direction === "down" && page.nextElementSibling?.classList.contains("print-page")) {
+                page.parentNode.insertBefore(page.nextElementSibling, page);
+              }
+              page.scrollIntoView({ block: "center" });
+            }
+            document.addEventListener("click", event => {
+              const button = event.target.closest("[data-move-page]");
+              if (!button) return;
+              movePage(button.closest(".print-page"), button.dataset.movePage);
+            });
+            document.addEventListener("dragstart", event => {
+              const page = event.target.closest(".print-page");
+              if (!page) return;
+              draggedPage = page;
+              page.classList.add("dragging");
+              event.dataTransfer.effectAllowed = "move";
+            });
+            document.addEventListener("dragover", event => {
+              const page = event.target.closest(".print-page");
+              if (!page || !draggedPage || page === draggedPage) return;
+              event.preventDefault();
+              const rect = page.getBoundingClientRect();
+              const before = event.clientY < rect.top + rect.height / 2;
+              clearDropClasses();
+              page.classList.add(before ? "drop-before" : "drop-after");
+            });
+            document.addEventListener("drop", event => {
+              const page = event.target.closest(".print-page");
+              if (!page || !draggedPage || page === draggedPage) return;
+              event.preventDefault();
+              const rect = page.getBoundingClientRect();
+              const before = event.clientY < rect.top + rect.height / 2;
+              page.parentNode.insertBefore(draggedPage, before ? page : page.nextSibling);
+              clearDropClasses();
+            });
+            document.addEventListener("dragend", () => {
+              draggedPage?.classList.remove("dragging");
+              draggedPage = null;
+              clearDropClasses();
+            });
+          })();
+        </script>
       </body>
     </html>`;
 }
@@ -2258,8 +2404,11 @@ function openPrintablePlaybook() {
     window.alert("Your browser blocked the print window. Allow popups for this site and try again.");
     return;
   }
+  const options = {
+    hideNotes: Boolean(els.playbookLibrary.querySelector("#printHideNotesInput")?.checked)
+  };
   printWindow.document.open();
-  printWindow.document.write(printablePlaybookDocumentMarkup(selectedPlays));
+  printWindow.document.write(printablePlaybookDocumentMarkup(selectedPlays, options));
   printWindow.document.close();
   printWindow.focus();
 }
