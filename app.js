@@ -2198,17 +2198,21 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
           }
           .print-page {
             width: 10.6in;
-            min-height: 7.3in;
+            height: 7.15in;
             margin: 18px auto;
             padding: .22in;
             display: grid;
             grid-template-rows: auto 1fr auto;
-            break-after: page;
-            page-break-after: always;
+            break-inside: avoid;
+            page-break-inside: avoid;
             border: 1px solid #d9d7cd;
             border-radius: 12px;
             background: #fffdf7;
             box-shadow: 0 16px 45px rgba(11,30,22,.12);
+          }
+          .print-page + .print-page {
+            break-before: page;
+            page-break-before: always;
           }
           .print-page.dragging {
             opacity: .45;
@@ -2246,10 +2250,6 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
             font-weight: 900;
             cursor: pointer;
           }
-          .print-page:last-child {
-            break-after: auto;
-            page-break-after: auto;
-          }
           header {
             margin-bottom: 8px;
             display: flex;
@@ -2277,6 +2277,7 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
           }
           main {
             min-height: 0;
+            height: 100%;
             border: 5px solid #ffffff;
             border-radius: 10px;
             overflow: hidden;
@@ -2285,7 +2286,6 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
           svg {
             width: 100%;
             height: 100%;
-            min-height: 5.72in;
             display: block;
           }
           .print-note {
@@ -2316,13 +2316,20 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
             .print-page-controls { display: none; }
             .print-page {
               width: auto;
-              min-height: auto;
+              height: 7.02in;
               margin: 0;
+              padding: .12in;
               border: 0;
               border-radius: 0;
               box-shadow: none;
             }
-            main { min-height: 5.55in; }
+            header { margin-bottom: 5px; }
+            h1 { font-size: 20px; }
+            footer {
+              margin-top: 5px;
+              padding: 5px 7px;
+              font-size: 8px;
+            }
           }
         </style>
       </head>
