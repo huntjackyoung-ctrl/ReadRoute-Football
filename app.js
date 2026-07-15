@@ -1455,6 +1455,27 @@ function playMatchesPlaybookSearch(play) {
   return `${play.name} ${playFormationName(play)}`.toLowerCase().includes(query);
 }
 
+function formationMatchesPlaybookSearch(formation) {
+  const query = normalizedPlaybookSearch();
+  if (!query) return true;
+  return formation.name.toLowerCase().includes(query);
+}
+
+function formationLibraryRowMarkup(formation) {
+  const formationPlayCount = plays.filter(play => play.formationId === formation.id).length;
+  return `
+    <div class="library-file-row">
+      <button class="library-file ${libraryPreview.type === "formation" && libraryPreview.id === formation.id ? "active" : ""}" data-library-formation="${formation.id}">
+        <span class="library-file-icon">F</span>
+        <span>${escapeHtml(formation.name)}</span>
+        <small>${formationPlayCount} ${formationPlayCount === 1 ? "play" : "plays"}</small>
+      </button>
+      <button class="library-action-button" data-edit-formation="${formation.id}">Edit</button>
+      <button class="library-action-button danger" data-delete-formation="${formation.id}" ${formations.length === 1 || formationPlayCount ? "disabled" : ""}>Delete</button>
+    </div>
+  `;
+}
+
 function playLibraryRowMarkup(play) {
   const formationName = playFormationName(play);
   return `
@@ -1910,6 +1931,9 @@ function allFilesBrowserMarkup() {
 
 function playbookSearchResultsMarkup() {
   const query = normalizedPlaybookSearch();
+  const matchingFormations = formations
+    .filter(formationMatchesPlaybookSearch)
+    .sort((a, b) => a.name.localeCompare(b.name));
   const matchingPlays = plays
     .filter(playMatchesPlaybookSearch)
     .sort((a, b) => {
@@ -1921,13 +1945,19 @@ function playbookSearchResultsMarkup() {
       <div class="custom-folder-heading">
         <div>
           <p class="eyebrow">Search results</p>
-          <h3>${matchingPlays.length} ${matchingPlays.length === 1 ? "Play" : "Plays"} Found</h3>
-          <p class="custom-folder-help">Showing saved plays that match "${escapeHtml(query)}" by play name or formation.</p>
+          <h3>${matchingFormations.length + matchingPlays.length} Result${matchingFormations.length + matchingPlays.length === 1 ? "" : "s"} Found</h3>
+          <p class="custom-folder-help">Showing saved formations and plays that match "${escapeHtml(query)}".</p>
         </div>
       </div>
+      ${matchingFormations.length
+        ? `<p class="folder-picker-heading">Formations</p>${matchingFormations.map(formationLibraryRowMarkup).join("")}`
+        : ""}
       ${matchingPlays.length
-        ? matchingPlays.map(playLibraryRowMarkup).join("")
-        : `<p class="library-empty">No plays match that search yet.</p>`}
+        ? `<p class="folder-picker-heading">Plays</p>${matchingPlays.map(playLibraryRowMarkup).join("")}`
+        : ""}
+      ${!matchingFormations.length && !matchingPlays.length
+        ? `<p class="library-empty">No formations or plays match that search yet.</p>`
+        : ""}
     </section>
   `;
 }
@@ -2114,6 +2144,12 @@ function renderPlaybookLibrary() {
         }
       }
       selectLibraryPreview("formation", summary.dataset.libraryFormationSummary);
+    });
+  });
+
+  els.playbookLibrary.querySelectorAll("[data-library-formation]").forEach(button => {
+    button.addEventListener("click", () => {
+      selectLibraryPreview("formation", button.dataset.libraryFormation);
     });
   });
 
