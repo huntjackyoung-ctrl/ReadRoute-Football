@@ -3205,6 +3205,102 @@ option {
   color: #96aaa0;
 }
 
+.all-files-browser {
+  padding: 16px;
+  border: 1px solid rgba(201,255,74,.16);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 0 0, rgba(201,255,74,.08), transparent 36%),
+    rgba(7, 18, 13, .9);
+  box-shadow: var(--shadow-card);
+}
+
+.all-files-folder {
+  margin-top: 8px;
+  border: 1px solid rgba(201,255,74,.1);
+  border-radius: 14px;
+  background: rgba(255,255,255,.045);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.045);
+}
+
+.all-files-folder summary {
+  min-height: 48px;
+  padding: 9px 11px;
+  grid-template-columns: 28px minmax(0, 1fr) auto;
+  gap: 10px;
+  color: #f2fff6;
+  border-radius: 14px;
+  background: rgba(255,255,255,.035);
+  font-size: 11px;
+}
+
+.all-files-folder[open] > summary {
+  border-radius: 14px 14px 0 0;
+}
+
+.all-files-folder summary small {
+  min-width: 56px;
+  color: #c1d2c8;
+  text-align: right;
+}
+
+.all-files-folder .library-folder-icon,
+.all-files-folder .library-file-icon {
+  color: #06120d;
+  background: linear-gradient(135deg, var(--lime), #9cff70);
+  box-shadow: 0 0 14px rgba(201,255,74,.16);
+}
+
+.all-files-folder .library-folder-actions,
+.all-files-folder .library-folder-content {
+  border-color: rgba(201,255,74,.1);
+  background: rgba(4, 13, 9, .42);
+}
+
+.all-files-folder .library-file-row {
+  min-height: 44px;
+  border-color: rgba(201,255,74,.08);
+  color: #eefbf3;
+  background: rgba(255,255,255,.03);
+}
+
+.all-files-folder .library-file {
+  color: #eefbf3;
+  background: transparent;
+}
+
+.all-files-folder .library-file span {
+  color: #eefbf3;
+}
+
+.all-files-folder .library-file:hover,
+.all-files-folder .library-file.active {
+  color: #06120d;
+  background: linear-gradient(135deg, var(--lime), #a6ff76);
+}
+
+.all-files-folder .library-file:hover span,
+.all-files-folder .library-file.active span {
+  color: #06120d;
+}
+
+.library-folder-preview-button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  font-weight: 950;
+  cursor: pointer;
+}
+
+.library-folder-preview-button:hover,
+.library-folder-preview-button.active {
+  color: var(--lime);
+}
+
 .library-drag-handle {
   width: 4px;
   height: 24px;

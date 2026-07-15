@@ -1817,10 +1817,14 @@ function allFilesBrowserMarkup() {
         .filter(play => play.formationId === formation.id)
         .sort((a, b) => a.name.localeCompare(b.name));
       return `
-        <details class="library-folder formation-folder" data-library-folder-state="formation:${formation.id}"${libraryFolderOpenAttribute(`formation:${formation.id}`)}>
+        <details class="library-folder formation-folder all-files-folder" data-library-folder-state="formation:${formation.id}"${libraryFolderOpenAttribute(`formation:${formation.id}`)}>
           <summary>
             <span class="library-folder-icon">F</span>
-            <span>${escapeHtml(formation.name)}</span>
+            <button
+              type="button"
+              class="library-folder-preview-button ${libraryPreview.type === "formation" && libraryPreview.id === formation.id ? "active" : ""}"
+              data-library-formation="${formation.id}"
+            >${escapeHtml(formation.name)}</button>
             <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
           </summary>
           <div class="library-folder-actions">
@@ -1860,7 +1864,7 @@ function allFilesBrowserMarkup() {
       </div>
       ${formationFolders || `<p class="library-empty">No formations saved yet.</p>`}
       ${unassignedPlays.length ? `
-        <details class="library-folder all-plays-folder" data-library-folder-state="unassigned-plays"${libraryFolderOpenAttribute("unassigned-plays")}>
+        <details class="library-folder all-plays-folder all-files-folder" data-library-folder-state="unassigned-plays"${libraryFolderOpenAttribute("unassigned-plays")}>
           <summary>
             <span class="library-folder-icon">P</span>
             <span>Plays Without Formation</span>
@@ -1880,7 +1884,7 @@ function allFilesBrowserMarkup() {
           </div>
         </details>
       ` : ""}
-      <details class="library-folder defense-files-folder" data-library-folder-state="defenses"${libraryFolderOpenAttribute("defenses")}>
+      <details class="library-folder defense-files-folder all-files-folder" data-library-folder-state="defenses"${libraryFolderOpenAttribute("defenses")}>
         <summary>
           <span class="library-folder-icon">D</span>
           <span>Defenses</span>
@@ -2100,6 +2104,14 @@ function renderPlaybookLibrary() {
           ? { type: "folder", folderId: button.dataset.libraryFolderContext }
           : null
       );
+    });
+  });
+
+  els.playbookLibrary.querySelectorAll("[data-library-formation]").forEach(button => {
+    button.addEventListener("click", event => {
+      event.preventDefault();
+      event.stopPropagation();
+      selectLibraryPreview("formation", button.dataset.libraryFormation);
     });
   });
 
@@ -2859,16 +2871,21 @@ function libraryFieldMarkingsMarkup() {
 
 function libraryPreviewMarkup() {
   const isDefense = libraryPreview.type === "defense";
-  const item = isDefense
+  const isFormation = libraryPreview.type === "formation";
+  const item = isFormation
+    ? formations.find(formation => formation.id === libraryPreview.id) || formations[0]
+    : isDefense
     ? defenses.find(defense => defense.id === libraryPreview.id) || defenses[0]
     : plays.find(play => play.id === libraryPreview.id) || plays[0];
-  const formation = isDefense
+  const formation = isFormation
+    ? item
+    : isDefense
     ? currentFormation()
     : formations.find(savedFormation => savedFormation.id === item.formationId) || formations[0];
-  const offensePositions = isDefense
+  const offensePositions = isFormation || isDefense
     ? formation.offensePositions
     : item.offensePositions || formation.offensePositions;
-  const offenseLabels = isDefense
+  const offenseLabels = isFormation || isDefense
     ? formation.labels
     : item.labels || formation.labels;
   const navigation = libraryPreviewNavigation();
@@ -2886,7 +2903,7 @@ function libraryPreviewMarkup() {
       ${navigation.next ? "" : "disabled"}
     >&#8594;</button>
   ` : "";
-  const routeMarkup = isDefense ? "" : skillPositions.map(position => {
+  const routeMarkup = isDefense || isFormation ? "" : skillPositions.map(position => {
     const playerColor = positionColor(position.id, "offense");
     const route = item.routes[position.id] || [];
     const motion = item.motions?.[position.id] || [];
@@ -2905,7 +2922,7 @@ function libraryPreviewMarkup() {
       : "";
     return motionPath + routePath;
   }).join("");
-  const qbRouteMarkup = isDefense
+  const qbRouteMarkup = isDefense || isFormation
     ? ""
     : (() => {
         const start = offensePositions.QB;
@@ -2917,7 +2934,7 @@ function libraryPreviewMarkup() {
           : routePathData(start, route);
         return `<path d="${pathData}" fill="none" stroke="${playerColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#libraryArrow)"></path>`;
       })();
-  const optionRouteMarkup = isDefense ? "" : skillPositions.map(position => {
+  const optionRouteMarkup = isDefense || isFormation ? "" : skillPositions.map(position => {
     const playerColor = positionColor(position.id, "offense");
     const start = offensePositions[position.id];
     const motion = item.motions?.[position.id] || [];
@@ -2981,7 +2998,9 @@ function libraryPreviewMarkup() {
       : "";
     return `${zoneMarkup}${manLine}${path}<g transform="translate(${start.x} ${start.y})"><circle r="15" fill="${defenderColor}" stroke="#ffd8ca" stroke-width="2"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(defenderColor)}" font-size="8" font-weight="900">${escapeHtml(item.labels[id] || String(index + 1))}</text></g>`;
   }).join("") : "";
-  const notes = isDefense
+  const notes = isFormation
+    ? (formation.notes || [])
+    : isDefense
     ? (item.notes || [])
     : [...(formation.notes || []), ...(item.notes || [])];
   const notesMarkup = notes.map(note => {
@@ -2997,7 +3016,7 @@ function libraryPreviewMarkup() {
       </g>
     `;
   }).join("");
-  const routeOptionSummary = isDefense ? "" : skillPositions.flatMap(position =>
+  const routeOptionSummary = isDefense || isFormation ? "" : skillPositions.flatMap(position =>
     routeOptionsFor(item, position.id).map(option => {
       const defenseNames = option.defenseIds
         .map(defenseId => defenses.find(candidate => candidate.id === defenseId)?.name)
@@ -3009,7 +3028,7 @@ function libraryPreviewMarkup() {
   return `
     <div class="library-preview-heading">
       <div>
-        <p class="eyebrow">${isDefense ? "Defense preview" : escapeHtml(formation.name)}</p>
+        <p class="eyebrow">${isFormation ? "Formation preview" : isDefense ? "Defense preview" : escapeHtml(formation.name)}</p>
         <h3>${escapeHtml(item.name)}</h3>
       </div>
       <span class="library-field-standard">${escapeHtml(fieldStandards[fieldStandard].label)} field</span>
