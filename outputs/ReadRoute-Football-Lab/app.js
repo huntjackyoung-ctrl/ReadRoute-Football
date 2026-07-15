@@ -276,6 +276,7 @@ let libraryPreview = { type: "play", id: selectedPlayId };
 let libraryPreviewContext = null;
 let playbookTab = "all";
 let playbookSearchQuery = "";
+let printPlaybookOpen = false;
 let activeFolderPickerId = null;
 let activeFolderPickerSearch = "";
 let trenchesState = loadTrenchesState();
@@ -1830,6 +1831,439 @@ function folderPickerPanelMarkup() {
   `;
 }
 
+function printFolderOptionMarkup(folder, depth = 0) {
+  const children = libraryFolderChildren(folder.id);
+  const printCount = collectFolderPrintPlayIds(folder.id).size;
+  return `
+    <div class="print-folder-option" style="--print-folder-depth:${depth}">
+      <label class="print-playbook-check">
+        <input type="checkbox" data-print-folder="${folder.id}" ${printCount ? "" : "disabled"}>
+        <span>
+          <strong>${escapeHtml(folder.name)}</strong>
+          <small>${printCount} ${printCount === 1 ? "play" : "plays"}</small>
+        </span>
+      </label>
+      ${children.map(child => printFolderOptionMarkup(child, depth + 1)).join("")}
+    </div>
+  `;
+}
+
+function printPlaybookPanelMarkup() {
+  if (!printPlaybookOpen) return "";
+  const rootFolders = sortLibraryFolderList(libraryFolders.filter(folder =>
+    !folder.parentId || !libraryFolders.some(candidate => candidate.id === folder.parentId)
+  ));
+  const formationGroups = formations
+    .slice()
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .map(formation => {
+      const formationPlays = plays
+        .filter(play => play.formationId === formation.id)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return `
+        <details class="print-playbook-group">
+          <summary>
+            <label class="print-playbook-check">
+              <input type="checkbox" data-print-formation="${formation.id}" ${formationPlays.length ? "" : "disabled"}>
+              <span>
+                <strong>${escapeHtml(formation.name)}</strong>
+                <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
+              </span>
+            </label>
+          </summary>
+          <div class="print-playbook-options">
+            ${formationPlays.length
+              ? formationPlays.map(play => `
+                <label class="print-playbook-check compact">
+                  <input type="checkbox" data-print-play="${play.id}">
+                  <span>${escapeHtml(play.name)}</span>
+                </label>
+              `).join("")
+              : `<p class="library-empty">No plays saved in this formation yet.</p>`}
+          </div>
+        </details>
+      `;
+    }).join("");
+  const unassignedPlays = plays
+    .filter(play => !formations.some(formation => formation.id === play.formationId))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const unassignedGroup = unassignedPlays.length
+    ? `
+      <details class="print-playbook-group">
+        <summary>
+          <span class="print-playbook-check">
+            <span class="library-file-icon">P</span>
+            <span>
+              <strong>Plays Without Formation</strong>
+              <small>${unassignedPlays.length} ${unassignedPlays.length === 1 ? "play" : "plays"}</small>
+            </span>
+          </span>
+        </summary>
+        <div class="print-playbook-options">
+          ${unassignedPlays.map(play => `
+            <label class="print-playbook-check compact">
+              <input type="checkbox" data-print-play="${play.id}">
+              <span>${escapeHtml(play.name)}</span>
+            </label>
+          `).join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  return `
+    <section class="print-playbook-panel">
+      <div class="print-playbook-heading">
+        <div>
+          <p class="eyebrow">Print out playbook</p>
+          <h3>Choose Plays For PDF</h3>
+          <p>Select folders, whole formations, or individual plays. The printout is one play per landscape page.</p>
+        </div>
+        <div class="print-playbook-actions">
+          <button class="library-action-button" data-close-print-playbook>Cancel</button>
+          <button class="library-action-button button-primary" data-generate-print-playbook ${plays.length ? "" : "disabled"}>Create Printout</button>
+        </div>
+      </div>
+      <div class="print-playbook-grid">
+        <div class="print-playbook-section">
+          <p class="folder-picker-heading">Folders</p>
+          ${rootFolders.length
+            ? rootFolders.map(folder => printFolderOptionMarkup(folder)).join("")
+            : `<p class="library-empty">No custom folders yet.</p>`}
+        </div>
+        <div class="print-playbook-section">
+          <p class="folder-picker-heading">Formations & Plays</p>
+          ${formationGroups}${unassignedGroup}
+          ${!formationGroups && !unassignedGroup ? `<p class="library-empty">No plays saved yet.</p>` : ""}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function collectFolderPrintPlayIds(folderId, collected = new Set()) {
+  const folder = libraryFolders.find(candidate => candidate.id === folderId);
+  if (!folder) return collected;
+  sortedFolderItems(folder).forEach(item => {
+    if (item.type === "play") {
+      collected.add(item.id);
+    } else if (item.type === "formation") {
+      plays
+        .filter(play => play.formationId === item.id)
+        .forEach(play => collected.add(play.id));
+    }
+  });
+  libraryFolderChildren(folder.id).forEach(child => {
+    collectFolderPrintPlayIds(child.id, collected);
+  });
+  return collected;
+}
+
+function selectedPrintPlayIds() {
+  const selected = new Set();
+  els.playbookLibrary.querySelectorAll("[data-print-folder]:checked").forEach(input => {
+    collectFolderPrintPlayIds(input.dataset.printFolder).forEach(id => selected.add(id));
+  });
+  els.playbookLibrary.querySelectorAll("[data-print-formation]:checked").forEach(input => {
+    plays
+      .filter(play => play.formationId === input.dataset.printFormation)
+      .forEach(play => selected.add(play.id));
+  });
+  els.playbookLibrary.querySelectorAll("[data-print-play]:checked").forEach(input => {
+    selected.add(input.dataset.printPlay);
+  });
+  return [...selected]
+    .map(id => plays.find(play => play.id === id))
+    .filter(Boolean)
+    .sort((a, b) => {
+      const formationCompare = playFormationName(a).localeCompare(playFormationName(b));
+      return formationCompare || a.name.localeCompare(b.name);
+    });
+}
+
+function printMarkerId(play, name) {
+  return `${name}-${String(play.id).replace(/[^a-z0-9_-]/gi, "")}`;
+}
+
+function printablePlayDiagramMarkup(play) {
+  const formation = formations.find(savedFormation => savedFormation.id === play.formationId) || formations[0];
+  const offensePositions = play.offensePositions || formation.offensePositions;
+  const offenseLabels = play.labels || formation.labels;
+  const routeMarkup = skillPositions.map(position => {
+    const playerColor = positionColor(position.id, "offense");
+    const route = play.routes[position.id] || [];
+    const motion = play.motions?.[position.id] || [];
+    const start = offensePositions[position.id];
+    const snapStart = motionEnd(start, motion);
+    const dx = snapStart.x - start.x;
+    const dy = snapStart.y - start.y;
+    const shiftedRoute = motion.length
+      ? route.map(point => ({ ...point, x: point.x + dx, y: point.y + dy }))
+      : route;
+    const motionPath = motion.length
+      ? `<path d="${motion.length === 1 ? `M ${start.x} ${start.y} L ${motion[0].x} ${motion[0].y}` : routePathData(start, motion)}" fill="none" stroke="${playerColor}" stroke-width="4" stroke-dasharray="7 6" marker-end="url(#${printMarkerId(play, "motionArrow")})"></path>`
+      : "";
+    const routePath = shiftedRoute.length
+      ? `<path d="${shiftedRoute.length === 1 ? `M ${snapStart.x} ${snapStart.y} L ${shiftedRoute[0].x} ${shiftedRoute[0].y}` : routePathData(snapStart, shiftedRoute)}" fill="none" stroke="${playerColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#${printMarkerId(play, "routeArrow")})"></path>`
+      : "";
+    return motionPath + routePath;
+  }).join("");
+  const qbRouteMarkup = (() => {
+    const start = offensePositions.QB;
+    const playerColor = positionColor("QB", "offense");
+    const route = play.routes.QB || [];
+    if (!route.length) return "";
+    const pathData = route.length === 1
+      ? `M ${start.x} ${start.y} L ${route[0].x} ${route[0].y}`
+      : routePathData(start, route);
+    return `<path d="${pathData}" fill="none" stroke="${playerColor}" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" marker-end="url(#${printMarkerId(play, "routeArrow")})"></path>`;
+  })();
+  const optionRouteMarkup = skillPositions.map(position => {
+    const playerColor = positionColor(position.id, "offense");
+    const start = offensePositions[position.id];
+    const motion = play.motions?.[position.id] || [];
+    const snapStart = motionEnd(start, motion);
+    const dx = snapStart.x - start.x;
+    const dy = snapStart.y - start.y;
+    return routeOptionsFor(play, position.id).map(option => {
+      const storedAnchor = routeAnchorPoint(start, play.routes[position.id] || [], option.anchor);
+      if (!storedAnchor || !option.points.length) return "";
+      const displayAnchor = { x: storedAnchor.x + dx, y: storedAnchor.y + dy };
+      const shifted = motion.length
+        ? option.points.map(point => ({ ...point, x: point.x + dx, y: point.y + dy }))
+        : option.points;
+      const pathData = shifted.length === 1
+        ? `M ${displayAnchor.x} ${displayAnchor.y} L ${shifted[0].x} ${shifted[0].y}`
+        : routePathData(displayAnchor, shifted);
+      return `<path d="${pathData}" fill="none" stroke="${playerColor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" stroke-dasharray="8 6" marker-end="url(#${printMarkerId(play, "optionArrow")})" opacity=".82"></path>`;
+    }).join("");
+  }).join("");
+  const offenseMarkup = [
+    ...skillPositions.map(position => {
+      const point = offensePositions[position.id];
+      const playerColor = positionColor(position.id, "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><circle r="18" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="10" font-weight="900">${escapeHtml(offenseLabels[position.id] || position.id)}</text></g>`;
+    }),
+    ...offensiveLine.map(player => {
+      const point = offensePositions[player.id];
+      const playerColor = positionColor(player.id, "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><rect x="-15" y="-15" width="30" height="30" rx="5" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></rect><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="9" font-weight="900">${player.label}</text></g>`;
+    }),
+    (() => {
+      const point = offensePositions.QB;
+      const playerColor = positionColor("QB", "offense");
+      return `<g transform="translate(${point.x} ${point.y})"><circle r="19" fill="${playerColor}" stroke="#fff5d7" stroke-width="3"></circle><text y="4" text-anchor="middle" fill="${readableTextColor(playerColor)}" font-size="10" font-weight="900">QB</text></g>`;
+    })()
+  ].join("");
+  const notes = [...(formation.notes || []), ...(play.notes || [])];
+  const notesMarkup = notes.map(note => {
+    const dimensions = noteDimensions(note.text);
+    const x = Math.max(6, Math.min(note.x, fieldWidth - 6 - dimensions.width));
+    const y = Math.max(6, Math.min(note.y, fieldHeight - 6 - dimensions.height));
+    return `
+      <g transform="translate(${x} ${y})">
+        <rect width="${dimensions.width}" height="${dimensions.height}" rx="5" fill="rgba(255,253,247,.96)" stroke="#c9f45c" stroke-width="2"></rect>
+        <foreignObject x="5" y="5" width="${Math.max(1, dimensions.width - 10)}" height="${Math.max(1, dimensions.height - 10)}">
+          <div xmlns="http://www.w3.org/1999/xhtml" class="print-note">${escapeHtml(note.text || "")}</div>
+        </foreignObject>
+      </g>
+    `;
+  }).join("");
+  const routeOptionSummary = skillPositions.flatMap(position =>
+    routeOptionsFor(play, position.id).map(option => {
+      const defenseNames = option.defenseIds
+        .map(defenseId => defenses.find(candidate => candidate.id === defenseId)?.name)
+        .filter(Boolean);
+      return `<span><strong>${escapeHtml(offenseLabels[position.id] || position.id)}:</strong> ${escapeHtml(option.name)} vs. ${escapeHtml(defenseNames.join(", ") || "Unassigned defense")}</span>`;
+    })
+  ).join("");
+
+  return `
+    <article class="print-page">
+      <header>
+        <div>
+          <p>${escapeHtml(formation.name)}</p>
+          <h1>${escapeHtml(play.name)}</h1>
+        </div>
+        <span>${escapeHtml(fieldStandards[fieldStandard].label)} field</span>
+      </header>
+      <main>
+        <svg viewBox="0 0 ${fieldWidth} ${fieldHeight}" aria-label="${escapeHtml(play.name)} print diagram">
+          <defs>
+            <marker id="${printMarkerId(play, "routeArrow")}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+            <marker id="${printMarkerId(play, "motionArrow")}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+            <marker id="${printMarkerId(play, "optionArrow")}" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto" markerUnits="userSpaceOnUse"><path d="M0,0 L0,6 L7,3 z" fill="context-stroke"></path></marker>
+          </defs>
+          <rect width="${fieldWidth}" height="${fieldHeight}" rx="10" fill="#174c35"></rect>
+          ${libraryFieldMarkingsMarkup()}
+          ${routeMarkup}${qbRouteMarkup}${optionRouteMarkup}${offenseMarkup}${notesMarkup}
+        </svg>
+      </main>
+      ${routeOptionSummary
+        ? `<footer><strong>Route options</strong>${routeOptionSummary}</footer>`
+        : ""}
+    </article>
+  `;
+}
+
+function printablePlaybookDocumentMarkup(selectedPlays) {
+  const title = `ReadRoute Playbook - ${new Date().toLocaleDateString()}`;
+  return `<!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8">
+        <title>${escapeHtml(title)}</title>
+        <style>
+          @page { size: landscape; margin: .35in; }
+          * { box-sizing: border-box; }
+          body {
+            margin: 0;
+            color: #10231c;
+            background: #eef1e8;
+            font-family: Inter, Arial, sans-serif;
+          }
+          .print-toolbar {
+            position: sticky;
+            top: 0;
+            z-index: 5;
+            padding: 10px 16px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            color: #f4fff7;
+            background: #091b14;
+            box-shadow: 0 8px 24px rgba(0,0,0,.18);
+          }
+          .print-toolbar strong { font-size: 14px; }
+          .print-toolbar button {
+            padding: 9px 14px;
+            border: 0;
+            border-radius: 7px;
+            color: #06120d;
+            background: #c9f45c;
+            font-weight: 900;
+            cursor: pointer;
+          }
+          .print-page {
+            width: 10.6in;
+            min-height: 7.3in;
+            margin: 18px auto;
+            padding: .22in;
+            display: grid;
+            grid-template-rows: auto 1fr auto;
+            break-after: page;
+            page-break-after: always;
+            border: 1px solid #d9d7cd;
+            border-radius: 12px;
+            background: #fffdf7;
+            box-shadow: 0 16px 45px rgba(11,30,22,.12);
+          }
+          .print-page:last-child {
+            break-after: auto;
+            page-break-after: auto;
+          }
+          header {
+            margin-bottom: 8px;
+            display: flex;
+            align-items: end;
+            justify-content: space-between;
+            gap: 16px;
+          }
+          header p {
+            margin: 0 0 2px;
+            color: #66736d;
+            font-size: 10px;
+            font-weight: 950;
+            letter-spacing: .14em;
+            text-transform: uppercase;
+          }
+          h1 {
+            margin: 0;
+            font: 800 24px Georgia, serif;
+          }
+          header span {
+            color: #66736d;
+            font-size: 9px;
+            font-weight: 900;
+            text-transform: uppercase;
+          }
+          main {
+            min-height: 0;
+            border: 5px solid #ffffff;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #174c35;
+          }
+          svg {
+            width: 100%;
+            height: 100%;
+            min-height: 5.72in;
+            display: block;
+          }
+          .print-note {
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            color: #10231c;
+            white-space: pre-wrap;
+            overflow-wrap: anywhere;
+            font: 800 12px/1.3 Arial, sans-serif;
+          }
+          footer {
+            margin-top: 8px;
+            padding: 8px 10px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            border: 1px solid #dce8bc;
+            border-radius: 8px;
+            color: #10231c;
+            background: #f4fadf;
+            font-size: 10px;
+          }
+          footer strong { color: #174c35; text-transform: uppercase; letter-spacing: .12em; }
+          @media print {
+            body { background: #fff; }
+            .print-toolbar { display: none; }
+            .print-page {
+              width: auto;
+              min-height: auto;
+              margin: 0;
+              border: 0;
+              border-radius: 0;
+              box-shadow: none;
+            }
+            main { min-height: 5.55in; }
+          }
+        </style>
+      </head>
+      <body>
+        <div class="print-toolbar">
+          <strong>${selectedPlays.length} ${selectedPlays.length === 1 ? "play" : "plays"} ready</strong>
+          <button onclick="window.print()">Print / Save PDF</button>
+        </div>
+        ${selectedPlays.map(printablePlayDiagramMarkup).join("")}
+      </body>
+    </html>`;
+}
+
+function openPrintablePlaybook() {
+  const selectedPlays = selectedPrintPlayIds();
+  if (!selectedPlays.length) {
+    window.alert("Choose at least one play to print.");
+    return;
+  }
+  const printWindow = window.open("", "_blank");
+  if (!printWindow) {
+    window.alert("Your browser blocked the print window. Allow popups for this site and try again.");
+    return;
+  }
+  printWindow.document.open();
+  printWindow.document.write(printablePlaybookDocumentMarkup(selectedPlays));
+  printWindow.document.close();
+  printWindow.focus();
+}
+
 function allFilesBrowserMarkup() {
   const formationFolders = [...formations]
     .sort((a, b) => a.name.localeCompare(b.name))
@@ -2046,6 +2480,7 @@ function renderPlaybookLibrary() {
           <span><strong>${defenses.length}</strong> Defenses</span>
         </div>
         <div class="library-transfer-actions">
+          <button id="printPlaybookButton" class="library-action-button">Print Playbook</button>
           <button id="saveBackupNowButton" class="library-action-button">Save Backup Now</button>
           <button id="exportPlaybookButton" class="library-action-button">Download Backup</button>
           <button id="restoreBackupButton" class="library-action-button">Restore Previous Backup</button>
@@ -2083,6 +2518,7 @@ function renderPlaybookLibrary() {
         <button class="library-action-button" data-clear-playbook-search ${playbookSearchQuery ? "" : "disabled"}>Clear</button>
       </div>
     </div>
+    ${printPlaybookPanelMarkup()}
     ${folderPickerPanelMarkup()}
     <div class="library-browser">
       <div class="library-files">
@@ -2477,6 +2913,21 @@ function renderPlaybookLibrary() {
 
   els.playbookLibrary.querySelector("#exportPlaybookButton")
     ?.addEventListener("click", exportPlaybook);
+  els.playbookLibrary.querySelector("#printPlaybookButton")
+    ?.addEventListener("click", () => {
+      printPlaybookOpen = !printPlaybookOpen;
+      renderPlaybookLibrary();
+    });
+  els.playbookLibrary.querySelector("[data-close-print-playbook]")
+    ?.addEventListener("click", () => {
+      printPlaybookOpen = false;
+      renderPlaybookLibrary();
+    });
+  els.playbookLibrary.querySelector("[data-generate-print-playbook]")
+    ?.addEventListener("click", openPrintablePlaybook);
+  els.playbookLibrary.querySelectorAll(".print-playbook-check input").forEach(input => {
+    input.addEventListener("click", event => event.stopPropagation());
+  });
   els.playbookLibrary.querySelector("#saveBackupNowButton")
     ?.addEventListener("click", () => {
       lastSavedSignature = "";
