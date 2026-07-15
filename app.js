@@ -2104,7 +2104,15 @@ function renderPlaybookLibrary() {
   });
 
   els.playbookLibrary.querySelectorAll("[data-library-formation-summary]").forEach(summary => {
-    summary.addEventListener("click", () => {
+    summary.addEventListener("click", event => {
+      const folder = summary.closest("details");
+      if (folder) {
+        event.preventDefault();
+        folder.open = !folder.open;
+        if (folder.dataset.libraryFolderState) {
+          libraryFolderOpenState.set(folder.dataset.libraryFolderState, folder.open);
+        }
+      }
       selectLibraryPreview("formation", summary.dataset.libraryFormationSummary);
     });
   });
