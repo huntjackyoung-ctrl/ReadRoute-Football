@@ -2121,9 +2121,9 @@ function printablePlayDiagramMarkup(play, options = {}) {
   ).join("");
 
   return `
-    <article class="print-page" draggable="true">
+    <article class="print-page">
       <div class="print-page-controls">
-        <span class="print-page-handle" title="Drag to reorder">Drag</span>
+        <span class="print-page-handle" draggable="true" title="Drag to reorder">Drag</span>
         <button type="button" data-move-page="up">Up</button>
         <button type="button" data-move-page="down">Down</button>
       </div>
@@ -2337,7 +2337,7 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
         <div class="print-toolbar">
           <div>
             <strong>${selectedPlays.length} ${selectedPlays.length === 1 ? "play" : "plays"} ready</strong>
-            <span>Drag pages or use Up/Down to set the order before printing.</span>
+            <span>Drag the green handle, scroll normally, or use Up/Down to set the order before printing.</span>
           </div>
           <button onclick="window.print()">Print / Save PDF</button>
         </div>
@@ -2345,9 +2345,38 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
         <script>
           (() => {
             let draggedPage = null;
+            let autoScrollFrame = null;
+            let autoScrollVelocity = 0;
             const pages = () => [...document.querySelectorAll(".print-page")];
             function clearDropClasses() {
               pages().forEach(page => page.classList.remove("drop-before", "drop-after"));
+            }
+            function stopAutoScroll() {
+              autoScrollVelocity = 0;
+              if (autoScrollFrame) cancelAnimationFrame(autoScrollFrame);
+              autoScrollFrame = null;
+            }
+            function autoScrollStep() {
+              if (!autoScrollVelocity) {
+                autoScrollFrame = null;
+                return;
+              }
+              window.scrollBy({ top: autoScrollVelocity, left: 0, behavior: "auto" });
+              autoScrollFrame = requestAnimationFrame(autoScrollStep);
+            }
+            function updateAutoScroll(clientY) {
+              const edgeSize = 110;
+              const maxSpeed = 24;
+              const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+              if (clientY < edgeSize) {
+                autoScrollVelocity = -Math.max(6, Math.round(((edgeSize - clientY) / edgeSize) * maxSpeed));
+              } else if (clientY > viewportHeight - edgeSize) {
+                autoScrollVelocity = Math.max(6, Math.round(((clientY - (viewportHeight - edgeSize)) / edgeSize) * maxSpeed));
+              } else {
+                stopAutoScroll();
+                return;
+              }
+              if (!autoScrollFrame) autoScrollFrame = requestAnimationFrame(autoScrollStep);
             }
             function movePage(page, direction) {
               if (!page) return;
@@ -2365,13 +2394,21 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
               movePage(button.closest(".print-page"), button.dataset.movePage);
             });
             document.addEventListener("dragstart", event => {
-              const page = event.target.closest(".print-page");
+              const handle = event.target.closest(".print-page-handle");
+              if (!handle) {
+                event.preventDefault();
+                return;
+              }
+              const page = handle.closest(".print-page");
               if (!page) return;
               draggedPage = page;
               page.classList.add("dragging");
               event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", "move-page");
             });
             document.addEventListener("dragover", event => {
+              if (!draggedPage) return;
+              updateAutoScroll(event.clientY);
               const page = event.target.closest(".print-page");
               if (!page || !draggedPage || page === draggedPage) return;
               event.preventDefault();
@@ -2392,8 +2429,10 @@ function printablePlaybookDocumentMarkup(selectedPlays, options = {}) {
             document.addEventListener("dragend", () => {
               draggedPage?.classList.remove("dragging");
               draggedPage = null;
+              stopAutoScroll();
               clearDropClasses();
             });
+            window.addEventListener("blur", stopAutoScroll);
           })();
         </script>
       </body>
