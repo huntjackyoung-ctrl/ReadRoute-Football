@@ -3226,12 +3226,18 @@ option {
 .all-files-folder summary {
   min-height: 48px;
   padding: 9px 11px;
+  display: grid;
   grid-template-columns: 28px minmax(0, 1fr) auto;
   gap: 10px;
   color: #f2fff6;
   border-radius: 14px;
   background: rgba(255,255,255,.035);
   font-size: 11px;
+}
+
+.all-files-folder.formation-folder summary::before {
+  content: none;
+  display: none;
 }
 
 .all-files-folder[open] > summary {
@@ -3254,7 +3260,37 @@ option {
 .all-files-folder .library-folder-actions,
 .all-files-folder .library-folder-content {
   border-color: rgba(201,255,74,.1);
-  background: rgba(4, 13, 9, .42);
+  background: rgba(4, 13, 9, .72);
+}
+
+.all-files-folder .library-folder-actions {
+  padding: 8px;
+  border-top: 1px solid rgba(201,255,74,.1);
+  border-bottom: 1px solid rgba(201,255,74,.1);
+}
+
+.all-files-folder .library-action-button {
+  color: #eaf8ef;
+  border-color: rgba(201,255,74,.24);
+  background: rgba(255,255,255,.055);
+}
+
+.all-files-folder .library-action-button:hover {
+  color: #06120d;
+  border-color: var(--lime);
+  background: var(--lime);
+}
+
+.all-files-folder .library-action-button.danger {
+  color: #ffb39d;
+  border-color: rgba(255,135,100,.32);
+}
+
+.all-files-folder .library-action-button:disabled {
+  color: rgba(234,248,239,.38);
+  border-color: rgba(201,255,74,.08);
+  background: rgba(255,255,255,.025);
+  opacity: 1;
 }
 
 .all-files-folder .library-file-row {
@@ -3287,11 +3323,8 @@ option {
 .library-folder-preview-button {
   width: 100%;
   padding: 0;
-  border: 0;
   color: inherit;
-  background: transparent;
   text-align: left;
-  font: inherit;
   font-weight: 950;
   cursor: pointer;
 }

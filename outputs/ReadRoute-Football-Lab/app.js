@@ -1818,13 +1818,9 @@ function allFilesBrowserMarkup() {
         .sort((a, b) => a.name.localeCompare(b.name));
       return `
         <details class="library-folder formation-folder all-files-folder" data-library-folder-state="formation:${formation.id}"${libraryFolderOpenAttribute(`formation:${formation.id}`)}>
-          <summary>
+          <summary data-library-formation-summary="${formation.id}">
             <span class="library-folder-icon">F</span>
-            <button
-              type="button"
-              class="library-folder-preview-button ${libraryPreview.type === "formation" && libraryPreview.id === formation.id ? "active" : ""}"
-              data-library-formation="${formation.id}"
-            >${escapeHtml(formation.name)}</button>
+            <span class="library-folder-preview-button ${libraryPreview.type === "formation" && libraryPreview.id === formation.id ? "active" : ""}">${escapeHtml(formation.name)}</span>
             <small>${formationPlays.length} ${formationPlays.length === 1 ? "play" : "plays"}</small>
           </summary>
           <div class="library-folder-actions">
@@ -2107,11 +2103,9 @@ function renderPlaybookLibrary() {
     });
   });
 
-  els.playbookLibrary.querySelectorAll("[data-library-formation]").forEach(button => {
-    button.addEventListener("click", event => {
-      event.preventDefault();
-      event.stopPropagation();
-      selectLibraryPreview("formation", button.dataset.libraryFormation);
+  els.playbookLibrary.querySelectorAll("[data-library-formation-summary]").forEach(summary => {
+    summary.addEventListener("click", () => {
+      selectLibraryPreview("formation", summary.dataset.libraryFormationSummary);
     });
   });
 
